@@ -29,14 +29,14 @@ int main(int argc, char *argv[])
 {
     setlocale(LC_ALL, "");
     QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName("CineEncoder");
-    QCoreApplication::setApplicationName("CineEncoder");
+    QCoreApplication::setOrganizationName("CineEncoder Marek");
+    QCoreApplication::setApplicationName("CineEncoder Marek");
     QCoreApplication::setAttribute(Qt::AA_UseStyleSheetPropagationInWidgetStyles, true);
     app.setStyle(QStyleFactory::create("Fusion"));
     if (checkForDuplicates() == 1) return 1;
 
     /******************* Read Settings ****************************/
-    const QString _settings_path = QDir::homePath() + QString("/CineEncoder");
+    const QString _settings_path = QApplication::applicationDirPath() + QString("/settings");
     QSettings *_settings = new QSettings(_settings_path + QString("/settings.ini"), QSettings::IniFormat, nullptr);
     _settings->beginGroup("Settings");
     int _fontSize = _settings->value("Settings/font_size").toInt();

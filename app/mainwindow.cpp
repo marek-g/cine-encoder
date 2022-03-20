@@ -702,7 +702,7 @@ void Widget::setParameters()    /*** Set parameters ***/
     _settingsWindowGeometry = "default";
     _presetWindowGeometry = "default";
     _openDir = QDir::homePath();
-    _settings_path = QDir::homePath() + QString("/CineEncoder");
+    _settings_path = QApplication::applicationDirPath() + QString("/settings");
     _thumb_path = _settings_path + QString("/thumbnails");
     _preset_file = _settings_path + QString("/presets.ini");
     _settings = new QSettings(_settings_path + QString("/settings.ini"), QSettings::IniFormat, this);
