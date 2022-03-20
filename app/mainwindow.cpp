@@ -1868,7 +1868,7 @@ void Widget::onEncodingStarted()
     ui->actionResetLabels->setEnabled(false);
     ui->actionSettings->setEnabled(false);
     ui->labelAnimation->show();
-    animation->start();
+    //animation->start();
     ui->label_Progress->show();
     ui->label_Remaining->show();
     ui->label_RemTime->show();
@@ -1988,7 +1988,7 @@ void Widget::resume()   // Resume encoding
     if (_protection) timer->start();
     if (encoder->getEncodingState() != QProcess::NotRunning) {
         setStatus(tr("Encoding"));
-        animation->start();
+        //animation->start();
         encoder->resumeEncoding();
     }
 }
