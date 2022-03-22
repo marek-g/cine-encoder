@@ -122,7 +122,7 @@ void Encoder::initEncoding(const QString  &temp_file,
         if (_CODEC >= CODEC_QSV_FIRST && _CODEC <= CODEC_QSV_LAST) { // QSV
             resize_vf = QString("scale_qsv=w=%1:h=%2,setsar=1:1").arg(new_width, new_height);
         }
-        if (_CODEC >= CODEC_VAAPI_FIRST && _CODEC <= CODEC_VAAPI_LAST) { // VAAPI
+        else if (_CODEC >= CODEC_VAAPI_FIRST && _CODEC <= CODEC_VAAPI_LAST) { // VAAPI
             resize_vf = QString("scale_vaapi=w=%1:h=%2,setsar=1:1").arg(new_width, new_height);
         }
         else {
