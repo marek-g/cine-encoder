@@ -203,6 +203,25 @@
                </widget>
               </item>
               <item>
+               <widget class="QPushButton" name="buttonTab_3">
+                <property name="minimumSize">
+                 <size>
+                  <width>150</width>
+                  <height>30</height>
+                 </size>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>150</width>
+                  <height>30</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string>Marek</string>
+                </property>
+               </widget>
+              </item>
+              <item>
                <spacer name="verticalSpacer_13">
                 <property name="orientation">
                  <enum>Qt::Vertical</enum>
@@ -1472,6 +1491,24 @@
                  </widget>
                 </item>
                </layout>
+              </widget>
+              <widget class="QWidget" name="tab_Marek">
+               <attribute name="title">
+                <string>Marek</string>
+               </attribute>
+               <widget class="QCheckBox" name="checkBox_blackBorders">
+                <property name="geometry">
+                 <rect>
+                  <x>20</x>
+                  <y>10</y>
+                  <width>211</width>
+                  <height>22</height>
+                 </rect>
+                </property>
+                <property name="text">
+                 <string>Black Borders</string>
+                </property>
+               </widget>
               </widget>
              </widget>
             </item>

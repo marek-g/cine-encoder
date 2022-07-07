@@ -47,6 +47,7 @@ public:
                        QString    *ptr_output_folder,
                        QString    *ptr_temp_folder,
                        bool       *ptr_protection,
+                       bool       *ptr_black_borders,
                        bool       *ptr_showHDR_mode,
                        int        *ptr_timer_interval,
                        int        *ptr_theme,
@@ -89,6 +90,8 @@ private slots:
 
     void on_buttonTab_2_clicked();
 
+    void on_buttonTab_3_clicked();
+
 private:
 
     Ui::Settings *ui;
@@ -110,6 +113,7 @@ private:
 
     bool    *_ptr_showHDR_mode,
             *_ptr_protection,
+            *_ptr_black_borders,
             *_ptr_hideInTrayFlag;
 
     /**************** Geometry **************************/

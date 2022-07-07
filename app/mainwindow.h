@@ -85,7 +85,8 @@ public:
 
     bool        _hideInTrayFlag,
                 _showHDR_mode,
-                _protection;
+                _protection,
+                _black_borders;
 
     int         _fontSize,
                 _prefxType,

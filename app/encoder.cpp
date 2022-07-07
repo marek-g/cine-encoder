@@ -50,7 +50,8 @@ void Encoder::initEncoding(const QString  &temp_file,
                            QString  *_subtitleTitle,
                            int      *_audioStreamCheckState,
                            int      *_subtitleCheckState,
-                           int      *_fr_count)
+                           int      *_fr_count,
+                           bool     _black_borders)
 {
     std::cout << "Make preset..." << std::endl;                       // Debug information //
     _temp_file = temp_file;
@@ -118,8 +119,14 @@ void Encoder::initEncoding(const QString  &temp_file,
     QString resize_vf = "";
     QString new_width = (width[_WIDTH] != "Source") ? width[_WIDTH] : _width;
     QString new_height = (height[_HEIGHT] != "Source") ? height[_HEIGHT] : _height;
+
+    // should we add black borders ?
+    bool add_black_borders = _black_borders && new_width.toInt() * _height.toInt() != _width.toInt() * new_height.toInt();
+
     if ((width[_WIDTH] != "Source") || (height[_HEIGHT] != "Source")) {
-        if (_CODEC >= CODEC_QSV_FIRST && _CODEC <= CODEC_QSV_LAST) { // QSV
+        if (add_black_borders) {
+            resize_vf = QString("scale=%1:%2:force_original_aspect_ratio=decrease,pad=%1:%2:(ow-iw)/2:(oh-ih)/2,setsar=1").arg(new_width, new_height);
+        } else if (_CODEC >= CODEC_QSV_FIRST && _CODEC <= CODEC_QSV_LAST) { // QSV
             resize_vf = QString("scale_qsv=w=%1:h=%2").arg(new_width, new_height);
         }
         else if (_CODEC >= CODEC_VAAPI_FIRST && _CODEC <= CODEC_VAAPI_LAST) { // VAAPI
@@ -271,11 +278,11 @@ void Encoder::initEncoding(const QString  &temp_file,
     }
 
     /*********************************** Intel QSV presets ************************************/
-    QString intelQSV_filter = "hwmap=derive_device=qsv,format=qsv";
+    QString intelQSV_filter = add_black_borders ? "" : "hwmap=derive_device=qsv,format=qsv";
 #if defined (Q_OS_WIN64)
-    QString intelQSVhwaccel = " -hwaccel dxva2 -hwaccel_output_format dxva2_vld";
+    QString intelQSVhwaccel = add_black_borders ? " -hwaccel dxva2" : " -hwaccel dxva2 -hwaccel_output_format dxva2_vld";
 #elif defined (Q_OS_UNIX)
-    QString intelQSVhwaccel = " -hwaccel vaapi -hwaccel_output_format vaapi";
+    QString intelQSVhwaccel = add_black_borders ? " -hwaccel vaapi" : " -hwaccel vaapi -hwaccel_output_format vaapi";
 #endif
 
     /************************************* XDCAM presets **************************************/
@@ -296,11 +303,11 @@ void Encoder::initEncoding(const QString  &temp_file,
         {"-pix_fmt yuv420p10le -c:v libvpx-vp9 -speed 4 -profile:v 2 ", "",                     "1", ""},
         {"-pix_fmt yuv420p -c:v libvpx-vp9 -speed 4 ",                  "",                     "0", ""},
         {"-c:v hevc_qsv -profile:v main10 ",                            intelQSVhwaccel,   "1", intelQSV_filter},
-        {"-pix_fmt qsv -c:v hevc_qsv -profile:v main ",                 intelQSVhwaccel,   "0", intelQSV_filter},
-        {"-pix_fmt qsv -c:v h264_qsv -profile:v high ",                 intelQSVhwaccel,   "0", intelQSV_filter},
+        {add_black_borders ? "-c:v hevc_qsv -profile:v main " : "-pix_fmt qsv -c:v hevc_qsv -profile:v main ",                 intelQSVhwaccel,   "0", intelQSV_filter},
+        {add_black_borders ? "-c:v h264_qsv -profile:v high " : "-pix_fmt qsv -c:v h264_qsv -profile:v high ",                 intelQSVhwaccel,   "0", intelQSV_filter},
         {"-c:v vp9_qsv -profile:v 2 ",                                  intelQSVhwaccel,   "1", intelQSV_filter},
-        {"-pix_fmt qsv -c:v vp9_qsv ",                                  intelQSVhwaccel,   "0", intelQSV_filter},
-        {"-pix_fmt qsv -c:v mpeg2_qsv -profile:v high ",                intelQSVhwaccel,   "0", intelQSV_filter},
+        {add_black_borders ? "-c:v vp9_qsv " : "-pix_fmt qsv -c:v vp9_qsv ",                                  intelQSVhwaccel,   "0", intelQSV_filter},
+        {add_black_borders ? "-c:v mpeg2_qsv -profile:v high " : "-pix_fmt qsv -c:v mpeg2_qsv -profile:v high ",                intelQSVhwaccel,   "0", intelQSV_filter},
         {"-c:v h264_vaapi -profile:v high ",                 " -hwaccel vaapi -hwaccel_output_format vaapi",   "0", "format=nv12|vaapi,hwupload"}, // Intel VAAPI h264
         {"-pix_fmt p010le -c:v hevc_nvenc -profile:v main10 ",          " -hwaccel cuda",       "1", ""},
         {"-pix_fmt yuv420p -c:v hevc_nvenc -profile:v main ",           " -hwaccel cuda",       "0", ""},

@@ -65,6 +65,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
                              QString    *ptr_output_folder,
                              QString    *ptr_temp_folder,
                              bool       *ptr_protection,
+                             bool       *ptr_black_borders,
                              bool       *ptr_showHDR_mode,
                              int        *ptr_timer_interval,
                              int        *ptr_theme,
@@ -88,6 +89,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
     _ptr_output_folder = ptr_output_folder;
     _ptr_temp_folder = ptr_temp_folder;
     _ptr_protection = ptr_protection;
+    _ptr_black_borders = ptr_black_borders;
     _ptr_timer_interval = ptr_timer_interval;
     _ptr_theme = ptr_theme;
     _ptr_prefixName = ptr_prefixName;
@@ -120,6 +122,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
         ui->checkBox_protection->setChecked(true);
         ui->spinBox_protection_timer->setEnabled(true);
     }
+    ui->checkBox_blackBorders->setChecked(*_ptr_black_borders);
     QMap<QString, int> langIndex;
     langIndex["en"] = 0;
     langIndex["zh"] = 1;
@@ -253,6 +256,8 @@ void Settings::on_buttonApply_clicked()
     if (*_ptr_suffixType == 0) {
         *_ptr_suffixName = ui->lineEditSuffix->text();
     }
+    /* Marek */
+    *_ptr_black_borders = ui->checkBox_blackBorders->isChecked();
 
     this->accept();
 }
@@ -548,6 +553,7 @@ void Settings::on_buttonTab_1_clicked()
 {
     ui->buttonTab_1->setEnabled(false);
     ui->buttonTab_2->setEnabled(true);
+    ui->buttonTab_3->setEnabled(true);
     ui->tabWidgetSettings->setCurrentIndex(0);
 }
 
@@ -555,5 +561,15 @@ void Settings::on_buttonTab_2_clicked()
 {
     ui->buttonTab_1->setEnabled(true);
     ui->buttonTab_2->setEnabled(false);
+    ui->buttonTab_3->setEnabled(true);
     ui->tabWidgetSettings->setCurrentIndex(1);
 }
+
+void Settings::on_buttonTab_3_clicked()
+{
+    ui->buttonTab_1->setEnabled(true);
+    ui->buttonTab_2->setEnabled(true);
+    ui->buttonTab_3->setEnabled(false);
+    ui->tabWidgetSettings->setCurrentIndex(2);
+}
+

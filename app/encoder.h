@@ -59,7 +59,8 @@ public:
                       QString  *_subtitleTitle,
                       int      *_audioStreamCheckState,
                       int      *_subtitleCheckState,
-                      int      *_fr_count);
+                      int      *_fr_count,
+                      bool     _black_borders);
 
     QProcess::ProcessState getEncodingState();
 
