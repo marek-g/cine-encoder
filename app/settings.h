@@ -48,6 +48,7 @@ public:
                        QString    *ptr_temp_folder,
                        bool       *ptr_protection,
                        bool       *ptr_black_borders,
+                       bool       *ptr_decode_with_qsv,
                        bool       *ptr_showHDR_mode,
                        int        *ptr_timer_interval,
                        int        *ptr_theme,
@@ -114,6 +115,7 @@ private:
     bool    *_ptr_showHDR_mode,
             *_ptr_protection,
             *_ptr_black_borders,
+            *_ptr_decode_with_qsv,
             *_ptr_hideInTrayFlag;
 
     /**************** Geometry **************************/

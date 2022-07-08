@@ -1501,12 +1501,25 @@
                  <rect>
                   <x>20</x>
                   <y>10</y>
-                  <width>211</width>
+                  <width>321</width>
                   <height>22</height>
                  </rect>
                 </property>
                 <property name="text">
                  <string>Black Borders</string>
+                </property>
+               </widget>
+               <widget class="QCheckBox" name="checkBox_decodeWithQSV">
+                <property name="geometry">
+                 <rect>
+                  <x>20</x>
+                  <y>40</y>
+                  <width>321</width>
+                  <height>22</height>
+                 </rect>
+                </property>
+                <property name="text">
+                 <string>Decode with QSV (instead of DXVA2)</string>
                 </property>
                </widget>
               </widget>

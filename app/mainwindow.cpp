@@ -240,6 +240,7 @@ void Widget::closeEvent(QCloseEvent *event) // Show prompt when close app
         _settings->setValue("Settings/theme", _theme);
         _settings->setValue("Settings/protection", _protection);
         _settings->setValue("Settings/black_borders", _black_borders);
+        _settings->setValue("Settings/decode_with_qsv", _decode_with_qsv);
         _settings->setValue("Settings/show_hdr_mode", _showHDR_mode);
         _settings->setValue("Settings/temp_folder", _temp_folder);
         _settings->setValue("Settings/output_folder", _output_folder);
@@ -730,6 +731,7 @@ void Widget::setParameters()    /*** Set parameters ***/
     _hideInTrayFlag = false;
     _protection = false;
     _black_borders = false;
+    _decode_with_qsv = false;
     _batch_mode = false;
     _showHDR_mode = false;
     _row = -1;
@@ -865,6 +867,7 @@ void Widget::setParameters()    /*** Set parameters ***/
         _theme = _settings->value("Settings/theme").toInt();
         _protection = _settings->value("Settings/protection").toBool();
         _black_borders = _settings->value("Settings/black_borders").toBool();
+        _decode_with_qsv = _settings->value("Settings/decode_with_qsv").toBool();
         _showHDR_mode = _settings->value("Settings/show_hdr_mode").toBool();
         _temp_folder = _settings->value("Settings/temp_folder").toString();
         _output_folder = _settings->value("Settings/output_folder").toString();
@@ -1091,6 +1094,7 @@ void Widget::on_actionSettings_clicked()
                            &_temp_folder,
                            &_protection,
                            &_black_borders,
+                           &_decode_with_qsv,
                            &_showHDR_mode,
                            &_timer_interval,
                            &_theme,
@@ -1797,7 +1801,8 @@ void Widget::initEncoding()
                           _audioStreamCheckState,
                           _subtitleCheckState,
                           &_fr_count,
-                          _black_borders);
+                          _black_borders,
+                          _decode_with_qsv);
 }
 
 void Widget::onEncodingMode(const QString &mode)

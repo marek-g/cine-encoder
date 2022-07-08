@@ -66,6 +66,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
                              QString    *ptr_temp_folder,
                              bool       *ptr_protection,
                              bool       *ptr_black_borders,
+                             bool       *ptr_decode_with_qsv,
                              bool       *ptr_showHDR_mode,
                              int        *ptr_timer_interval,
                              int        *ptr_theme,
@@ -90,6 +91,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
     _ptr_temp_folder = ptr_temp_folder;
     _ptr_protection = ptr_protection;
     _ptr_black_borders = ptr_black_borders;
+    _ptr_decode_with_qsv = ptr_decode_with_qsv;
     _ptr_timer_interval = ptr_timer_interval;
     _ptr_theme = ptr_theme;
     _ptr_prefixName = ptr_prefixName;
@@ -123,6 +125,7 @@ void Settings::setParameters(QByteArray *ptr_settingsWindowGeometry,
         ui->spinBox_protection_timer->setEnabled(true);
     }
     ui->checkBox_blackBorders->setChecked(*_ptr_black_borders);
+    ui->checkBox_decodeWithQSV->setChecked(*_ptr_decode_with_qsv);
     QMap<QString, int> langIndex;
     langIndex["en"] = 0;
     langIndex["zh"] = 1;
@@ -258,6 +261,7 @@ void Settings::on_buttonApply_clicked()
     }
     /* Marek */
     *_ptr_black_borders = ui->checkBox_blackBorders->isChecked();
+    *_ptr_decode_with_qsv = ui->checkBox_decodeWithQSV->isChecked();
 
     this->accept();
 }

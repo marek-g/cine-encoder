@@ -60,7 +60,8 @@ public:
                       int      *_audioStreamCheckState,
                       int      *_subtitleCheckState,
                       int      *_fr_count,
-                      bool     _black_borders);
+                      bool     _black_borders,
+                      bool     _decode_with_qsv);
 
     QProcess::ProcessState getEncodingState();
 

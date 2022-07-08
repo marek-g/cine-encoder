@@ -51,7 +51,8 @@ void Encoder::initEncoding(const QString  &temp_file,
                            int      *_audioStreamCheckState,
                            int      *_subtitleCheckState,
                            int      *_fr_count,
-                           bool     _black_borders)
+                           bool     _black_borders,
+                           bool     _decode_with_qsv)
 {
     std::cout << "Make preset..." << std::endl;                       // Debug information //
     _temp_file = temp_file;
@@ -278,9 +279,11 @@ void Encoder::initEncoding(const QString  &temp_file,
     }
 
     /*********************************** Intel QSV presets ************************************/
-    QString intelQSV_filter = add_black_borders ? "" : "hwmap=derive_device=qsv,format=qsv";
+    QString intelQSV_filter = add_black_borders ? "" :
+        _decode_with_qsv ? "hwupload=extra_hw_frames=64,format=qsv" : "hwmap=derive_device=qsv,format=qsv";
 #if defined (Q_OS_WIN64)
-    QString intelQSVhwaccel = add_black_borders ? " -hwaccel dxva2" : " -hwaccel dxva2 -hwaccel_output_format dxva2_vld";
+    QString intelQSVhwaccel = _decode_with_qsv ? " -init_hw_device qsv=hw,child_device_type=d3d11va -hwaccel_output_format qsv -hwaccel qsv" :
+        add_black_borders ? " -hwaccel dxva2" : " -hwaccel dxva2 -hwaccel_output_format dxva2_vld";
 #elif defined (Q_OS_UNIX)
     QString intelQSVhwaccel = add_black_borders ? " -hwaccel vaapi" : " -hwaccel vaapi -hwaccel_output_format vaapi";
 #endif
