@@ -1,9 +1,9 @@
 <RCC>
     <qresource prefix="/">
-        <file>resources/css/style_1.css</file>
-        <file>resources/css/style_0.css</file>
         <file>resources/css/style_2.css</file>
         <file>resources/css/style_3.css</file>
+        <file>resources/css/style_1.css</file>
+        <file>resources/css/style_0.css</file>
         <file>resources/html/about.html</file>
         <file>resources/html/donate.html</file>
         <file>resources/icons/16x16/cil-3d.png</file>
@@ -268,7 +268,6 @@
         <file>resources/icons/16x16/cil-stop.png</file>
         <file>resources/icons/16x16/cil-sort-ascending.png</file>
         <file>resources/icons/16x16/cil-sort-descending.png</file>
-        <file>resources/icons/Animated/cil-spinner-circle.gif</file>
         <file>resources/icons/12x12/cil-input.png</file>
         <file>resources/icons/12x12/cil-output.png</file>
         <file>resources/icons/16x16/cil-edit-pencil.png</file>
@@ -329,5 +328,69 @@
         <file>resources/icons/16x16/cil-cursor-center.png</file>
         <file>resources/data/default_presets.ini</file>
         <file>resources/data/default_settings.ini</file>
+        <file>resources/css/style_4.css</file>
+        <file>resources/icons/gif/cil-spinner-circle.gif</file>
+        <file>resources/icons/svg/cine-encoder.svg</file>
+        <file>resources/icons/svg/no_preview.svg</file>
+        <file>resources/icons/svg/pause.svg</file>
+        <file>resources/icons/svg/play.svg</file>
+        <file>resources/icons/svg/forward.svg</file>
+        <file>resources/icons/svg/expand_black.svg</file>
+        <file>resources/icons/svg/restore_black.svg</file>
+        <file>resources/icons/svg/close_black.svg</file>
+        <file>resources/icons/svg/close.svg</file>
+        <file>resources/icons/svg/minimize_black.svg</file>
+        <file>resources/icons/svg/expand.svg</file>
+        <file>resources/icons/svg/minimize.svg</file>
+        <file>resources/icons/svg/restore.svg</file>
+        <file>resources/icons/svg/folder.svg</file>
+        <file>resources/icons/svg/folder_open_light.svg</file>
+        <file>resources/icons/svg/folder_open.svg</file>
+        <file>resources/icons/svg/folder_light.svg</file>
+        <file>resources/icons/svg/add.svg</file>
+        <file>resources/icons/svg/remove.svg</file>
+        <file>resources/icons/svg/broomstick.svg</file>
+        <file>resources/icons/svg/pencil.svg</file>
+        <file>resources/icons/svg/spinner.svg</file>
+        <file>resources/icons/svg/spinner_black.svg</file>
+        <file>resources/icons/svg/frame-right.svg</file>
+        <file>resources/icons/svg/frame-left.svg</file>
+        <file>resources/icons/svg/frame-top.svg</file>
+        <file>resources/icons/svg/frame-bottom.svg</file>
+        <file>resources/icons/svg/frame-bottom_black.svg</file>
+        <file>resources/icons/svg/frame-left_black.svg</file>
+        <file>resources/icons/svg/frame-right_black.svg</file>
+        <file>resources/icons/svg/frame-top_black.svg</file>
+        <file>resources/icons/svg/popup.svg</file>
+        <file>resources/icons/svg/warning.svg</file>
+        <file>resources/icons/svg/info.svg</file>
+        <file>resources/icons/svg/error.svg</file>
+        <file>resources/icons/svg/remove_file.svg</file>
+        <file>resources/icons/svg/add_file.svg</file>
+        <file>resources/icons/svg/sort_up.svg</file>
+        <file>resources/icons/svg/sort_down.svg</file>
+        <file>resources/icons/svg/undo.svg</file>
+        <file>resources/icons/svg/check.svg</file>
+        <file>resources/icons/svg/uncheck.svg</file>
+        <file>resources/icons/svg/history.svg</file>
+        <file>resources/icons/svg/order-history.svg</file>
+        <file>resources/icons/svg/undo_history.svg</file>
+        <file>resources/icons/svg/order-history_white.svg</file>
+        <file>resources/icons/svg/adjoins.svg</file>
+        <file>resources/icons/svg/haschild.svg</file>
+        <file>resources/icons/svg/vline.svg</file>
+        <file>resources/icons/svg/view_icons.svg</file>
+        <file>resources/icons/svg/view_list.svg</file>
+        <file>resources/icons/svg/shortest.svg</file>
+        <file>resources/icons/svg/not_shortest.svg</file>
+        <file>resources/icons/svg/up.svg</file>
+        <file>resources/icons/svg/left.svg</file>
+        <file>resources/icons/svg/right.svg</file>
+        <file>resources/icons/svg/sys_folder.svg</file>
+        <file>resources/icons/svg/desktop.svg</file>
+        <file>resources/icons/svg/file.svg</file>
+        <file>resources/icons/svg/computer.svg</file>
+        <file>resources/icons/svg/network.svg</file>
+        <file>resources/icons/svg/drive.svg</file>
     </qresource>
 </RCC>

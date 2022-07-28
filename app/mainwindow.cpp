@@ -5,7 +5,6 @@
                             COPYRIGHT (C) 2020
 
  FILE: mainwindow.cpp
- MODIFIED: January, 2022
  COMMENT:
  LICENSE: GNU General Public License v3.0
 
@@ -13,13 +12,43 @@
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include "about.h"
-#include "donate.h"
+#include "notification.h"
 #include "settings.h"
 #include "preset.h"
-#include "taskcomplete.h"
-#include "dialog.h"
-#include <QGraphicsDropShadowEffect>
+#include "message.h"
+#include "progress.h"
+#include "tables.h"
+#include "helper.h"
+#include "report.h"
+#include "fileiconprovider.h"
+#include <QDesktopWidget>
+#include <QPaintEvent>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeDatabase>
+#include <QMimeData>
+#include <QTableWidgetItem>
+#include <QListView>
+#include <QUrl>
+#include <QList>
+#include <QMenu>
+#include <QDate>
+#include <QFileDialog>
+#include <QStandardItemModel>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QDockWidget>
+#include <QFile>
+#include <QSizePolicy>
+#include <QMap>
+#include <QTranslator>
+#include <iostream>
+#include <iomanip>
+#include <math.h>
+#include <sstream>
+
 
 #if defined (Q_OS_UNIX)
     #ifndef UNICODE
@@ -41,725 +70,666 @@
     using namespace MediaInfoDLL;
 #endif
 
+#define WINDOW_SIZE QSize(1500, 920)
+#define ROWHEIGHT 25
+#define ROWHEIGHTDFLT 45
+#define DEFAULTTIMER 30
+#define DEFAULTPATH QDir::homePath()
+#define PRESETFILE SETTINGSPATH + QString("/presets.ini")
+#define THUMBNAILPATH SETTINGSPATH + QString("/thumbnails")
+#define GETINFO(a, b, c) QString::fromStdWString(MI.Get(a, b, __T(c)))
+#define GINFO(a, b) QString::fromStdWString(MI.Get(Stream_General, a, __T(b), Info_Text, Info_Name))
+#define VINFO(a, b) QString::fromStdWString(MI.Get(Stream_Video, a, __T(b)))
+#define AINFO(a, b) QString::fromStdWString(MI.Get(Stream_Audio, a, __T(b)))
+#define SINFO(a, b) QString::fromStdWString(MI.Get(Stream_Text, a, __T(b)))
+#define GETTEXT(row, col) ui->tableWidget->item(row, ColumnIndex::col)->text()
+#define SLT(method) &MainWindow::method
+#define _CHECKS(row, chk) m_data[row].checks[Data::chk]
+#define _FIELDS(row, fld) m_data[row].fields[Data::fld]
+
+typedef void(MainWindow::*FnVoidVoid)(void);
+typedef void(MainWindow::*FnVoidInt)(int);
 
 
-Widget::Widget(QWidget *parent):
-    QWidget(parent),
-    ui(new Ui::Widget),
-    _windowActivated(false),
-    _expandWindowsState(false),
-    _clickPressedFlag(false),
-    _clickPressedToResizeFlag(8, false)
+namespace MainWindowPrivate
 {
-    ui->setupUi(this);
-#ifdef Q_OS_WIN64
-    this->setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint |
-                         Qt::WindowMaximizeButtonHint | Qt::WindowMinimizeButtonHint);
-#else
-    this->setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-#endif
-    this->setMouseTracking(true);
-    this->setAcceptDrops(true);
-    this->setAttribute(Qt::WA_TranslucentBackground);
-
-    QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(ui->centralwidget);
-    shadow->setBlurRadius(10.0);
-    shadow->setColor(QColor(0, 0, 0, 160));
-    shadow->setOffset(0.0);
-    ui->centralwidget->setGraphicsEffect(shadow);
-    // **************************** Set front label ***********************************//
-
-    QHBoxLayout *raiseLayout = new QHBoxLayout(ui->tableWidget);
-    ui->tableWidget->setLayout(raiseLayout);
-    raiseThumb = new QLabel(ui->tableWidget);
-    raiseLayout->addWidget(raiseThumb);
-    raiseThumb->setObjectName(QString::fromUtf8("TableWidgetLabel"));
-    raiseThumb->setAlignment(Qt::AlignCenter);
-    raiseThumb->setText(tr("No media"));
-
-    audioThumb = new QLabel(ui->frameTab_2);
-    ui->gridLayoutAudio->addWidget(audioThumb);
-    audioThumb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    audioThumb->setObjectName(QString::fromUtf8("AudioLabel"));
-    audioThumb->setAlignment(Qt::AlignCenter);
-    audioThumb->setText(tr("No audio"));
-
-    subtitleThumb = new QLabel(ui->frameTab_3);
-    ui->gridLayoutSubtitle->addWidget(subtitleThumb);
-    subtitleThumb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    subtitleThumb->setObjectName(QString::fromUtf8("SubtitleLabel"));
-    subtitleThumb->setAlignment(Qt::AlignCenter);
-    subtitleThumb->setText(tr("No subtitle"));
-
-    // **************************** Create docks ***********************************//
-
-    QGridLayout *layout = new QGridLayout(ui->frame_middle);
-    ui->frame_middle->setLayout(layout);
-    window = new QMainWindow(ui->frame_middle);
-    layout->addWidget(window);
-    layout->setContentsMargins(6, 2, 6, 2);
-    layout->setVerticalSpacing(0);
-    layout->setHorizontalSpacing(0);
-    window->setObjectName("CentralWindow");
-    window->setWindowFlags(Qt::Widget);
-    window->setDockNestingEnabled(true);
-
-    centralWidget = new QWidget(window);
-    centralWidget->setObjectName("centralwidget");
-    window->setCentralWidget(centralWidget);
-
-    //window->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
-    //window->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
-    //window->setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
-    //window->setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
-
-    QGridLayout *centralwidgetLayout = new QGridLayout(centralWidget);
-    centralWidget->setLayout(centralwidgetLayout);
-    centralwidgetLayout->addWidget(ui->frame_task);
-    centralwidgetLayout->setContentsMargins(0, 0, 0, 0);
-
-    QList<QString> dockNames = {tr("Presets"), tr("Preview"), tr("Source"), tr("Output"),
-                                tr("Streams"), tr("Log"), tr("Metadata"), tr("Split")};
-    QList<Qt::DockWidgetArea> dockArea = {Qt::LeftDockWidgetArea, Qt::BottomDockWidgetArea,
-                                          Qt::BottomDockWidgetArea, Qt::BottomDockWidgetArea,
-                                          Qt::RightDockWidgetArea, Qt::RightDockWidgetArea,
-                                          Qt::RightDockWidgetArea, Qt::RightDockWidgetArea};
-    QList<QString> objNames = {"Dock_presets", "Dock_preview", "Dock_source", "Dock_output",
-                               "Dock_options", "Dock_log", "Dock_metadata", "Dock_split"};
-    QList<QFrame*> dockFrames= {ui->frameLeft, ui->frame_preview, ui->frame_source, ui->frame_output,
-                                ui->frameRight, ui->frameLog, ui->frameMetadata, ui->frameSplit};
-    QWidget *arrWidgets[DOCKS_COUNT];
-    QGridLayout *arrLayout[DOCKS_COUNT];
-    for (int ind = 0; ind < DOCKS_COUNT; ind++) {
-        docks[ind] = new QDockWidget(dockNames.at(ind), window);
-        docks[ind]->setObjectName(objNames[ind]);
-        docks[ind]->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
-        docks[ind]->setFeatures(QDockWidget::AllDockWidgetFeatures);
-        arrWidgets[ind] = new QWidget(docks[ind]);
-        arrWidgets[ind]->setObjectName(QString("dockWidgetContents_") + QString::number(ind));
-        docks[ind]->setWidget(arrWidgets[ind]);
-        window->addDockWidget(dockArea[ind], docks[ind]);
-        arrLayout[ind] = new QGridLayout(arrWidgets[ind]);
-        arrWidgets[ind]->setLayout(arrLayout[ind]);
-        arrLayout[ind]->addWidget(dockFrames[ind]);
-        arrLayout[ind]->setContentsMargins(0, 0, 0, 0);
-        arrLayout[ind]->setHorizontalSpacing(0);
-        arrLayout[ind]->setVerticalSpacing(0);
+    QLabel* createLabel(QWidget *parent, const char *name, const QString &text)
+    {
+        QLabel *label = new QLabel(parent);
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        label->setObjectName(QString::fromUtf8(name));
+        label->setAlignment(Qt::AlignCenter);
+        label->setText(text);
+        return label;
     }
 
-    // **************************** Set Event Filters ***********************************//
-    this->setAttribute(Qt::WA_Hover, true);
-    this->installEventFilter(this);
+    void undoLineEdit(QLineEdit *line) {
+        line->undo();
+        if (line->text() != "") {
+            line->setFocus();
+            line->setCursorPosition(0);
+            line->setModified(true);
+        }
+    };
 
-    ui->centralwidget->setAttribute(Qt::WA_Hover, true);
-    ui->centralwidget->setAttribute(Qt::WA_NoMousePropagation, true);
-    ui->frame_main->installEventFilter(this);
-    ui->frame_main->setAttribute(Qt::WA_Hover, true);
-    ui->frame_main->setAttribute(Qt::WA_NoMousePropagation, true);
-    ui->frame_top->installEventFilter(this);
-    raiseThumb->installEventFilter(this);
-    ui->labelThumb->installEventFilter(this);
-    ui->frame_middle->setFocusPolicy(Qt::StrongFocus);
+    void clearLineEdit(QLineEdit *line) {
+        line->clear();
+        line->insert("");
+        line->setFocus();
+        line->setModified(true);
+    }
 }
 
-Widget::~Widget()
+MainWindow::MainWindow(QWidget *parent):
+    BaseWindow(parent),
+    ui(new Ui::Widget),
+    m_pProcessThumbCreation(nullptr),
+    m_openDir(DEFAULTPATH),
+    m_theme(Theme::LIGHT),
+    m_batch_mode(false),
+    m_status_encode_btn(EncodingStatus::START),
+    m_row(-1),
+    m_curTime(0),
+    m_curFilename(""),
+    m_curPath(""),
+    m_temp_file(""),
+    m_input_file(""),
+    m_output_file(""),
+    m_hideInTrayFlag(false),
+    m_showHdrFlag(false),
+    m_multiInstances(false),
+    m_protectFlag(false),
+    m_fontSize(FONTSIZE),
+    m_prefxType(0),
+    m_suffixType(0),
+    m_pos_top(-1),
+    m_pos_cld(-1),
+    m_timerInterval(DEFAULTTIMER),
+    m_language("en"),
+    m_output_folder(""),
+    m_temp_folder(""),
+    m_prefixName(DEFAULTPREFIX),
+    m_suffixName(DEFAULTSUFFIX),
+    m_font(""),
+    m_windowActivated(false),
+    m_expandWindowsState(false),
+    m_rowHeight(ROWHEIGHTDFLT)
+{
+    ui->setupUi(centralWidget());
+    setTitleBar(ui->frame_top);
+    //*************** Set labels *****************//
+    QHBoxLayout *pTableLayout = new QHBoxLayout(ui->tableWidget);
+    ui->tableWidget->setLayout(pTableLayout);
+    m_pTableLabel = MainWindowPrivate::createLabel(ui->tableWidget, "TableWidgetLabel", tr("No media"));
+    pTableLayout->addWidget(m_pTableLabel);
+    m_pAudioLabel = MainWindowPrivate::createLabel(ui->frameAudio, "AudioLabel", tr("No audio"));
+    ui->gridLayoutAudio->addWidget(m_pAudioLabel);
+    m_pSubtitleLabel = MainWindowPrivate::createLabel(ui->frameSubtitle, "SubtitleLabel", tr("No subtitles"));
+    ui->gridLayoutSubtitle->addWidget(m_pSubtitleLabel);
+
+    //************** Create docks ******************//
+    QGridLayout *pMiddleLayout = new QGridLayout(ui->frameMiddle);
+    ui->frameMiddle->setLayout(pMiddleLayout);
+    m_pDocksContainer = new QMainWindow(ui->frameMiddle);
+    pMiddleLayout->addWidget(m_pDocksContainer);
+    pMiddleLayout->setContentsMargins(2, 2, 2, 2);
+    pMiddleLayout->setSpacing(0);
+    m_pDocksContainer->setObjectName("DocksContainer");
+    m_pDocksContainer->setWindowFlags(Qt::Widget);
+    m_pDocksContainer->setDockNestingEnabled(true);
+
+    m_pCentralDock = new QWidget(m_pDocksContainer);
+    m_pCentralDock->setObjectName("CentralDock");
+    m_pDocksContainer->setCentralWidget(m_pCentralDock);
+
+    m_pDocksContainer->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+    m_pDocksContainer->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+    m_pDocksContainer->setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+    m_pDocksContainer->setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
+
+    QGridLayout *pCentralDockLayout = new QGridLayout(m_pCentralDock);
+    m_pCentralDock->setLayout(pCentralDockLayout);
+    pCentralDockLayout->addWidget(ui->frameTask);
+    pCentralDockLayout->setContentsMargins(0, 0, 0, 0);
+
+    QFrame *pFrameSource = new QFrame(ui->frameMiddle);
+    QGridLayout *pSourceLayout = new QGridLayout(pFrameSource);
+    pSourceLayout->setContentsMargins(0, 0, 0, 0);
+    pFrameSource->setLayout(pSourceLayout);
+    m_pSplSource = new QSplitter(Qt::Horizontal, pFrameSource);
+    pSourceLayout->addWidget(m_pSplSource);
+    m_pSplSource->setHandleWidth(0);
+    ui->framePreview->setParent(pFrameSource);
+    ui->frameSource->setParent(pFrameSource);
+    m_pSplSource->addWidget(ui->framePreview);
+    m_pSplSource->addWidget(ui->frameSource);
+
+    QString dockNames[] = {
+        tr("Source"), tr("Presets"), tr("Output"),
+        tr("Streams"), tr("Log"), tr("Metadata"), tr("Split"), tr("Browser")
+    };
+    Qt::DockWidgetArea dockArea[] = {
+        Qt::LeftDockWidgetArea,   Qt::LeftDockWidgetArea,
+        Qt::BottomDockWidgetArea, Qt::RightDockWidgetArea,
+        Qt::RightDockWidgetArea,  Qt::RightDockWidgetArea,
+        Qt::RightDockWidgetArea,  Qt::LeftDockWidgetArea
+    };
+    QString objNames[] = {
+        "dockSource", "dockPresets", "dockOutput", "dockStreams",
+        "dockLog", "dockMetadata", "dockSplit", "dockBrowser"
+    };
+    QFrame* dockFrames[] = {
+        pFrameSource, ui->framePreset,  ui->frameOutput,
+        ui->frameStreams, ui->frameLog, ui->frameMetadata, ui->frameSplit, ui->frameBrowser
+    };
+    Q_LOOP(i, 0, DOCKS_COUNT) {
+        m_pDocks[i] = new QDockWidget(dockNames[i], m_pDocksContainer);
+        m_pDocks[i]->setObjectName(objNames[i]);
+        m_pDocks[i]->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::TopDockWidgetArea |
+                                     Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
+        m_pDocks[i]->setFeatures(QDockWidget::AllDockWidgetFeatures);
+        m_pDocks[i]->setWidget(dockFrames[i]);
+        m_pDocksContainer->addDockWidget(dockArea[i], m_pDocks[i]);
+    }
+    Q_LOOP(i, DockIndex::LOG_DOCK, DockIndex::SPLIT_DOCK + 1) {
+        m_pDocks[i]->toggleViewAction()->setChecked(false);
+        m_pDocks[i]->setVisible(false);
+        m_pDocks[i]->setFloating(true);
+    }
+
+    ui->streamAudio->setContentType(QStreamView::Content::Audio);
+    ui->streamSubtitle->setContentType(QStreamView::Content::Subtitle);
+    ui->switchCutting->setIcons(QIcon(QPixmap(":/resources/icons/svg/shortest.svg")),
+                                QIcon(QPixmap(":/resources/icons/svg/not_shortest.svg")));
+    ui->switchViewMode->setIcons(QIcon(QPixmap(":/resources/icons/svg/view_list.svg")),
+                                 QIcon(QPixmap(":/resources/icons/svg/view_icons.svg")));
+    ui->switchCutting->setToolTips(tr("Without cutting"), tr("Cut by shortest"));
+    ui->switchViewMode->setToolTips(tr("List view"), tr("Icon view"));
+
+    //*********** Set Event Filters ****************//
+    m_pTableLabel->installEventFilter(this);
+    ui->labelPreview->installEventFilter(this);
+    ui->frameMiddle->setFocusPolicy(Qt::StrongFocus);
+    setAcceptDrops(true);
+}
+
+MainWindow::~MainWindow()
 {
     delete ui;
 }
 
-void Widget::showEvent(QShowEvent *event)
+void MainWindow::showEvent(QShowEvent *event)
 {
-    QWidget::showEvent(event);
-    if (!_windowActivated) {
-        _windowActivated = true;
-        std::cout << "Window Activated ..." << std::endl;
+    BaseWindow::showEvent(event);
+    if (!m_windowActivated) {
+        m_windowActivated = true;
         setParameters();
     }
 }
 
-void Widget::closeEvent(QCloseEvent *event) // Show prompt when close app
+void MainWindow::closeEvent(QCloseEvent *event) // Show prompt when close app
 {
     event->ignore();
-    if (call_dialog(tr("Quit program?"))) {
-
-        if (encoder->getEncodingState() != QProcess::NotRunning) encoder->killEncoding();
-        if (processThumbCreation->state() != QProcess::NotRunning) processThumbCreation->kill();
-
-        QFile _prs_file(_preset_file);
-        if (_prs_file.open(QIODevice::WriteOnly)) {
-            QDataStream out(&_prs_file);
+    if (showDialogMessage(tr("Quit program?"))) {
+        if (m_pEncoder->getEncodingState() != QProcess::NotRunning)
+            m_pEncoder->killEncoding();
+        if (m_pProcessThumbCreation) {
+            if (m_pProcessThumbCreation->state() != QProcess::NotRunning)
+                m_pProcessThumbCreation->kill();
+        }
+        QFile prs_file(PRESETFILE);
+        if (prs_file.open(QIODevice::WriteOnly)) {
+            QDataStream out(&prs_file);
             out.setVersion(QDataStream::Qt_4_0);
             out << PRESETS_VERSION;
-            out << _cur_param << _pos_top << _pos_cld << _preset_table;
-            _prs_file.close();
+            out << m_curParams << m_pos_top << m_pos_cld << m_preset_table;
+            prs_file.close();
         }
 
+        SETTINGS(stn);
         // Save Version
-        _settings->setValue("Version", SETTINGS_VERSION);
-
-        // Save Main Widget
-        _settings->beginGroup("MainWidget");
-        _settings->setValue("MainWidget/geometry", this->saveGeometry());
-        _settings->endGroup();
-
-        // Save Main Window
-        _settings->beginGroup("MainWindow");
-        _settings->setValue("MainWindow/state", window->saveState());
-        _settings->setValue("MainWindow/geometry", window->saveGeometry());
-        _settings->beginWriteArray("MainWindow/docks_geometry");
-            for (int ind = 0; ind < DOCKS_COUNT; ind++) {
-                _settings->setArrayIndex(ind);
-                _settings->setValue("MainWindow/docks_geometry/dock_size", docks[ind]->size());
+        stn.setValue("Version", SETTINGS_VERSION);
+        // Save Window
+        stn.beginGroup("Window");
+        stn.setValue("Window/geometry", this->saveGeometry());
+        stn.endGroup();
+        // Save DocksContainer
+        stn.beginGroup("DocksContainer");
+        stn.setValue("DocksContainer/state", m_pDocksContainer->saveState());
+        stn.setValue("DocksContainer/geometry", m_pDocksContainer->saveGeometry());
+        stn.beginWriteArray("DocksContainer/docks_geometry");
+            Q_LOOP(i, 0, DOCKS_COUNT) {
+                stn.setArrayIndex(i);
+                stn.setValue("DocksContainer/docks_geometry/dock_size", m_pDocks[i]->size());
             }
-            _settings->endArray();
-        _settings->endGroup();
-
+            stn.endArray();
+        stn.endGroup();
         // Save Tables
-        _settings->beginGroup("Tables");
-        _settings->setValue("Tables/table_widget_state", ui->tableWidget->horizontalHeader()->saveState());
-        _settings->setValue("Tables/tree_widget_state", ui->treeWidget->header()->saveState());
-        _settings->endGroup();
-
-        // Save Settings Widget
-        _settings->beginGroup("SettingsWidget");
-        _settings->setValue("SettingsWidget/geometry", _settingsWindowGeometry);
-        _settings->endGroup();
-
-        // Save Preset Widget
-        _settings->beginGroup("PresetWidget");
-        _settings->setValue("PresetWidget/geometry", _presetWindowGeometry);
-        _settings->endGroup();
-
+        stn.beginGroup("Tables");
+        stn.setValue("Tables/table_widget_state", ui->tableWidget->horizontalHeader()->saveState());
+        stn.setValue("Tables/tree_widget_state", ui->treeWidget->header()->saveState());
+        stn.setValue("Tables/splitter_state", m_pSpl->saveState());
+        stn.setValue("Tables/splitter_source_state", m_pSplSource->saveState());
+        stn.endGroup();
         // Save Settings
-        _settings->beginGroup("Settings");
-        _settings->setValue("Settings/prefix_type", _prefxType);
-        _settings->setValue("Settings/suffix_type", _suffixType);
-        _settings->setValue("Settings/prefix_name", _prefixName);
-        _settings->setValue("Settings/suffix_name", _suffixName);
-        _settings->setValue("Settings/timer_interval", _timer_interval);
-        _settings->setValue("Settings/theme", _theme);
-        _settings->setValue("Settings/protection", _protection);
-        _settings->setValue("Settings/black_borders", _black_borders);
-        _settings->setValue("Settings/decode_with_qsv", _decode_with_qsv);
-        _settings->setValue("Settings/show_hdr_mode", _showHDR_mode);
-        _settings->setValue("Settings/temp_folder", _temp_folder);
-        _settings->setValue("Settings/output_folder", _output_folder);
-        _settings->setValue("Settings/open_dir", _openDir);
-        _settings->setValue("Settings/batch_mode", _batch_mode);
-        _settings->setValue("Settings/tray", _hideInTrayFlag);
-        _settings->setValue("Settings/language", _language);
-        _settings->setValue("Settings/font", _font);
-        _settings->setValue("Settings/font_size", _fontSize);
-        _settings->setValue("Settings/enviroment", _desktopEnv);
-        _settings->setValue("Settings/row_size", _rowSize);
-        _settings->endGroup();
+        stn.beginGroup("Settings");
+        stn.setValue("Settings/prefix_type", m_prefxType);
+        stn.setValue("Settings/suffix_type", m_suffixType);
+        stn.setValue("Settings/prefix_name", m_prefixName);
+        stn.setValue("Settings/suffix_name", m_suffixName);
+        stn.setValue("Settings/timer_interval", m_timerInterval);
+        stn.setValue("Settings/theme", m_theme);
+        stn.setValue("Settings/protection", m_protectFlag);
+        stn.setValue("Settings/black_borders", _black_borders);
+        stn.setValue("Settings/decode_with_qsv", _decode_with_qsv);
+        stn.setValue("Settings/allow_duplicates", m_multiInstances);
+        stn.setValue("Settings/show_hdr_mode", m_showHdrFlag);
+        stn.setValue("Settings/temp_folder", m_temp_folder);
+        stn.setValue("Settings/output_folder", m_output_folder);
+        stn.setValue("Settings/open_dir", m_openDir);
+        stn.setValue("Settings/batch_mode", m_batch_mode);
+        stn.setValue("Settings/tray", m_hideInTrayFlag);
+        stn.setValue("Settings/language", m_language);
+        stn.setValue("Settings/font", m_font);
+        stn.setValue("Settings/font_size", m_fontSize);
+        stn.setValue("Settings/row_size", m_rowHeight);
+        stn.setValue("Settings/switch_view_mode", ui->switchViewMode->currentIndex());
+        stn.setValue("Settings/switch_cut_mode", ui->switchCutting->currentIndex());
+        stn.endGroup();
 
-        if (_hideInTrayFlag) {
-            trayIcon->hide();
-        }
+        if (m_pTrayIcon)
+            m_pTrayIcon->deleteLater();
         event->accept();
     }
 }
 
-void Widget::paintEvent(QPaintEvent *event) // Disable QTab draw base
+void MainWindow::paintEvent(QPaintEvent *event) // Disable QTab draw base
 {
     if (event->type() == QEvent::Paint) {
-        QList<QTabBar*> tabBars = window->findChildren<QTabBar*>();
+        auto tabBars = m_pDocksContainer->findChildren<QTabBar*>();
         foreach (QTabBar *tabBar, tabBars) {
-            if (tabBar->drawBase()) {
+            if (tabBar->drawBase())
                  tabBar->setDrawBase(false);
-            }
         }
     }
 }
 
-void Widget::trayIconActivated(QSystemTrayIcon::ActivationReason reason)
+void MainWindow::setTrayIcon()
 {
-    switch (reason) {
+    m_pTrayIcon = new QSystemTrayIcon(this);
+    m_pTrayIcon->setIcon(QIcon(QPixmap(":/resources/icons/svg/cine-encoder.svg")));
+
+    QMenu *trayMenu = new QMenu(this);
+    const int ACT_COUNT = 3;
+    QString actNames[ACT_COUNT] = {tr("Hide"), tr("Show"), tr("Exit")};
+    FnVoidVoid actMethods[ACT_COUNT] = {
+        SLT(hide), SLT(onRestoreWindowState), SLT(onCloseWindow)
+    };
+    Q_LOOP(i, 0, ACT_COUNT) {
+        QAction *act = new QAction(actNames[i], trayMenu);
+        connect(act, &QAction::triggered, this, actMethods[i]);
+        trayMenu->addAction(act);
+    }
+    m_pTrayIcon->setContextMenu(trayMenu);
+    connect(m_pTrayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason rsn) {
+        switch (rsn) {
         case QSystemTrayIcon::Trigger:
         case QSystemTrayIcon::DoubleClick:
-            if (_expandWindowsState) {
-                this->showMaximized();
-            }
-            else {
-                this->showNormal();
-            }
+            onRestoreWindowState();
             break;
         default:
             break;
-    }
-}
-
-void Widget::setTrayIconActions()
-{
-    minimizeAction = new QAction(tr("Hide"), this);
-    restoreAction = new QAction(tr("Show"), this);
-    quitAction = new QAction(tr("Exit"), this);
-
-    connect(minimizeAction, SIGNAL(triggered()), this, SLOT(hide()));
-    connect(restoreAction, &QAction::triggered, this, [this](){
-        if (_expandWindowsState) {
-            this->showMaximized();
-        }
-        else {
-            this->showNormal();
         }
     });
-    connect(quitAction, SIGNAL(triggered()), this, SLOT(close()));
-
-    trayIconMenu = new QMenu(this);
-    trayIconMenu->addAction(minimizeAction);
-    trayIconMenu->addAction(restoreAction);
-    trayIconMenu->addAction(quitAction);
 }
 
-void Widget::showTrayIcon()
+void MainWindow::createConnections()
 {
-    trayIcon = new QSystemTrayIcon(this);
-    trayIcon->setIcon(QIcon(":/resources/icons/64x64/cine-encoder.png"));
-    trayIcon->setContextMenu(trayIconMenu);
-    connect(trayIcon, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(trayIconActivated(QSystemTrayIcon::ActivationReason)));
+    // Buttons
+    const int BTN_COUNT = 29;
+    QPushButton *btns[BTN_COUNT] = {
+        ui->closeWindow,  ui->hideWindow,    ui->expandWindow,
+        ui->addFiles,     ui->removeFile,    ui->sortUp,
+        ui->sortDown,     ui->stop,          ui->start,
+        ui->settings,     ui->clearMetadata, ui->undoMetadata,
+        ui->addExtStream, ui->clearTitles,   ui->undoTitles,
+        ui->framePrev,    ui->frameNext,     ui->setStartTime,
+        ui->setEndTime,   ui->removePreset,  ui->editPreset,
+        ui->applyPreset,  ui->addFilesHot,   ui->setOutFolder,
+        ui->closeTWindow, ui->resetLabels,   ui->report,
+        ui->back,         ui->forward
+    };
+    FnVoidVoid btn_methods[BTN_COUNT] = {
+        SLT(onCloseWindow),  SLT(onHideWindow),    SLT(onExpandWindow),
+        SLT(onAddFiles),     SLT(onRemoveFile),    SLT(onSortUp),
+        SLT(onSortDown),     SLT(onStop),          SLT(onStart),
+        SLT(onSettings),     SLT(onClearMetadata), SLT(onUndoMetadata),
+        SLT(onAddExtStream), SLT(onClearTitles),   SLT(onUndoTitles),
+        SLT(onFramePrev),    SLT(onFrameNext),     SLT(onSetStartTime),
+        SLT(onSetEndTime),   SLT(onRemovePreset),  SLT(onEditPreset),
+        SLT(onApplyPreset),  SLT(onAddFiles),      SLT(onSetOutFolder),
+        SLT(onCloseWindow),  SLT(onResetLabels),   SLT(onReport),
+        SLT(onBack),         SLT(onForward)
+    };
+    Q_LOOP(i, 0, BTN_COUNT)
+        connect(btns[i], &QPushButton::clicked, this, btn_methods[i]);
+
+    // Table
+    connect(ui->tableWidget, &QTableWidget::itemSelectionChanged,
+            this, SLT(onTableSelectionChanged));
+
+    connect(ui->switchViewMode, &QDoubleButton::indexChanged, this, SLT(onViewMode));
+
+    connect(ui->comboBoxMode, SIGNAL(currentIndexChanged(int)), this, SLOT(onComboModeChanged(int)));
+    connect(ui->sliderTimeline, &QSlider::valueChanged, this, SLT(onSliderTimelineChanged));
+    connect(ui->sliderResize, &QSlider::valueChanged, this, SLT(onSliderResizeChanged));
+
+    connect(ui->treeWidget, &QTreeWidget::itemCollapsed, this, SLT(onTreeCollapsed));
+    connect(ui->treeWidget, &QTreeWidget::itemExpanded, this, SLT(onTreeExpanded));
+    connect(ui->treeWidget, &QTreeWidget::itemChanged, this, SLT(onTreeChanged));
+    connect(ui->treeWidget, &QTreeWidget::itemDoubleClicked, this, SLT(onTreeDblClicked));
+
+    connect(ui->treeDirs, &QTreeView::clicked, this, SLT(onTreeDirsClicked));
+    connect(ui->treeDirs, &QTreeView::doubleClicked, this, SLT(onTreeDirsDblClicked));
+
+    m_pEncoder = new Encoder(this);
+    connect(m_pEncoder, &Encoder::onEncodingMode, this, SLT(onEncodingMode));
+    connect(m_pEncoder, &Encoder::onEncodingStarted, this, SLT(onEncodingStarted));
+    connect(m_pEncoder, &Encoder::onEncodingInitError, this, SLT(onEncodingInitError));
+    connect(m_pEncoder, &Encoder::onEncodingProgress, this, SLT(onEncodingProgress));
+    connect(m_pEncoder, &Encoder::onEncodingLog, this, SLT(onEncodingLog));
+    connect(m_pEncoder, &Encoder::onEncodingCompleted, this, SLT(onEncodingCompleted));
+    connect(m_pEncoder, &Encoder::onEncodingAborted, this, SLT(onEncodingAborted));
+    connect(m_pEncoder, &Encoder::onEncodingError, this, SLT(onEncodingError));
+
+    m_pTimer = new QTimer(this);
+    connect(m_pTimer, SIGNAL(timeout()), this, SLOT(repeatHandler_Type_1()));
+    m_pTimerSetThumbnail = new QTimer(this);
+    m_pTimerSetThumbnail->setSingleShot(true);
+    m_pTimerSetThumbnail->setInterval(800);
+    connect(m_pTimerSetThumbnail, SIGNAL(timeout()), this, SLOT(repeatHandler_Type_2()));
+
+    //************ Top menu actions ****************//
+    m_pMenuBar = new QMenuBar(ui->frame_top);
+    m_pMenuBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    QGridLayout *pTopLayout = dynamic_cast<QGridLayout*>(ui->frame_top->layout());
+    if (pTopLayout)
+        pTopLayout->addWidget(m_pMenuBar, 0, 5, Qt::AlignVCenter);
+    QMenu *menuFiles = m_pMenuBar->addMenu(tr("File"));
+    QMenu *menuEdit = m_pMenuBar->addMenu(tr("Edit"));
+    QMenu *menuTools = m_pMenuBar->addMenu(tr("Tools"));
+    QMenu *menuView = m_pMenuBar->addMenu(tr("View"));
+    QMenu *menuPreferences = m_pMenuBar->addMenu(tr("Preferences"));
+    QMenu *menuAbout = m_pMenuBar->addMenu(tr("About"));
+
+    m_pActAddFiles = new QAction(tr("Add files"), menuFiles);
+    m_pActRemoveFile = new QAction(tr("Remove from the list"), menuFiles);
+    m_pActCloseWindow = new QAction(tr("Close"), menuFiles);
+    connect(m_pActAddFiles, &QAction::triggered, this, SLT(onAddFiles));
+    connect(m_pActRemoveFile, &QAction::triggered, this, SLT(onRemoveFile));
+    connect(m_pActCloseWindow, &QAction::triggered, this, SLT(onCloseWindow));
+    menuFiles->addAction(m_pActAddFiles);
+    menuFiles->addAction(m_pActRemoveFile);
+    menuFiles->addSeparator();
+    menuFiles->addAction(m_pActCloseWindow);
+
+    m_pActStart = new QAction(tr("Encode/Pause"), menuEdit);
+    m_pActStop = new QAction(tr("Stop"), menuEdit);
+    connect(m_pActStart, &QAction::triggered, this, SLT(onStart));
+    connect(m_pActStop, &QAction::triggered, this, SLT(onStop));
+    menuEdit->addAction(m_pActStart);
+    menuEdit->addAction(m_pActStop);
+
+    m_pActEditMetadata = new QAction(tr("Edit metadata"), menuTools);
+    m_pActSelectAudio = new QAction(tr("Select audio streams"), menuTools);
+    m_pActSelectSubtitles = new QAction(tr("Select subtitles"), menuTools);
+    m_pActSplitVideo = new QAction(tr("Split video"), menuTools);
+    connect(m_pActEditMetadata, &QAction::triggered, this, SLT(showMetadataEditor));
+    connect(m_pActSelectAudio, &QAction::triggered, this, SLT(showAudioStreams));
+    connect(m_pActSelectSubtitles, &QAction::triggered, this, SLT(showSubtitles));
+    connect(m_pActSplitVideo, &QAction::triggered, this, SLT(showVideoSplitter));
+    menuTools->addAction(m_pActEditMetadata);
+    menuTools->addSeparator();
+    menuTools->addAction(m_pActSelectAudio);
+    menuTools->addAction(m_pActSelectSubtitles);
+    menuTools->addSeparator();
+    menuTools->addAction(m_pActSplitVideo);
+
+    m_pActResetView = new QAction(tr("Reset state"), menuView);
+    connect(m_pActResetView, &QAction::triggered, this, SLT(resetView));
+    Q_LOOP(i, 0, DOCKS_COUNT)
+        menuView->addAction(m_pDocks[i]->toggleViewAction());
+    menuView->addAction(m_pActResetView);
+
+    m_pActSettings = new QAction(tr("Settings"), menuPreferences);
+    connect(m_pActSettings, &QAction::triggered, this, SLT(onSettings));
+    menuPreferences->addAction(m_pActSettings);   
+
+    m_pActAbout = new QAction(tr("About"), menuAbout);
+    m_pActDonate = new QAction(tr("Donate"), menuAbout);
+    connect(m_pActAbout, &QAction::triggered, this, SLT(onActionAbout));
+    connect(m_pActDonate, &QAction::triggered, this, SLT(onActionDonate));
+    menuAbout->addAction(m_pActAbout);
+    menuAbout->addSeparator();
+    menuAbout->addAction(m_pActDonate);
+
+    //********** Table menu actions ****************//
+    ui->tableWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_pItemMenu = new QMenu(this);
+    m_pItemMenu->addAction(m_pActRemoveFile);
+    m_pItemMenu->addSeparator();
+    m_pItemMenu->addAction(m_pActStart);
+    m_pItemMenu->addSeparator();
+    m_pItemMenu->addAction(m_pActEditMetadata);
+    m_pItemMenu->addSeparator();
+    m_pItemMenu->addAction(m_pActSelectAudio);
+    m_pItemMenu->addAction(m_pActSelectSubtitles);
+    m_pItemMenu->addSeparator();
+    m_pItemMenu->addAction(m_pActSplitVideo);
+    connect(ui->tableWidget, &QTableWidget::customContextMenuRequested, this, SLT(provideContextMenu));
+
+    //********** File Browser actions **************//
+    ui->listFiles->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_pFilesItemMenu = new QMenu(ui->listFiles);
+    m_pActAddToTask = new QAction(tr("Add to task"), m_pFilesItemMenu);
+    connect(m_pActAddToTask, &QAction::triggered, this, SLT(onAddToTask));
+    m_pFilesItemMenu->addAction(m_pActAddToTask);
+    connect(ui->listFiles, &QListView::customContextMenuRequested, this, SLT(provideListContextMenu));
+
+    //*********** Tree menu actions ****************//
+    ui->treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    QAction *actAddSection = new QAction(tr("Add section"), this);
+    QAction *actAddPreset = new QAction(tr("Add preset"), this);
+    QAction *actRenamePreset = new QAction(tr("Rename"), this);
+    QAction *actRemovePreset = new QAction(tr("Remove"), this);
+    QAction *actApplyPreset = new QAction(tr("Apply"), this);
+    QAction *actEditPreset = new QAction(tr("Edit"), this);
+    connect(actAddSection, &QAction::triggered, this, SLT(onAddSection));
+    connect(actAddPreset, &QAction::triggered, this, SLT(onAddPreset));
+    connect(actRenamePreset, &QAction::triggered, this, SLT(onRenamePreset));
+    connect(actRemovePreset, &QAction::triggered, this, SLT(onRemovePreset));
+    connect(actApplyPreset, &QAction::triggered, this, SLT(onApplyPreset));
+    connect(actEditPreset, &QAction::triggered, this, SLT(onEditPreset));
+
+    m_pSectionMenu = new QMenu(this);
+    m_pSectionMenu->addAction(actAddSection);
+    m_pSectionMenu->addAction(actAddPreset);
+    m_pSectionMenu->addAction(actRenamePreset);
+    m_pSectionMenu->addAction(actRemovePreset);
+
+    m_pPresetMenu = new QMenu(this);
+    m_pPresetMenu->addAction(actAddSection);
+    m_pPresetMenu->addAction(actAddPreset);
+    m_pPresetMenu->addAction(actRenamePreset);
+    m_pPresetMenu->addAction(actRemovePreset);
+    m_pPresetMenu->addSeparator();
+    m_pPresetMenu->addAction(actApplyPreset);
+    m_pPresetMenu->addAction(actEditPreset);
+    connect(ui->treeWidget, &QTreeWidget::customContextMenuRequested, this, SLT(providePresetContextMenu));
+
+    //********** Preset menu actions ***************//
+    QMenu *addPresetMenu = new QMenu(ui->addPreset);
+    QAction *_actAddSection = new QAction(tr("Add section"), this);
+    QAction *_actAddPreset = new QAction(tr("Add new preset"), this);
+    _actAddSection->setIcon(QIcon(":/resources/icons/svg/folder_light.svg"));
+    _actAddPreset->setIcon(QIcon(":/resources/icons/svg/file.svg"));
+    connect(_actAddSection, &QAction::triggered, this, SLT(onAddSection));
+    connect(_actAddPreset, &QAction::triggered, this, SLT(onAddPreset));
+    addPresetMenu->addAction(_actAddSection);
+    addPresetMenu->addSeparator();
+    addPresetMenu->addAction(_actAddPreset);
+    ui->addPreset->setMenu(addPresetMenu);
+
+    //******* Metadata Elements Actions ************//
+    auto connectAction = [this](QLineEdit* line, bool isVisible)->void {
+        auto actionList = line->findChildren<QAction*>();
+        if (!actionList.isEmpty()) {
+            connect(actionList.first(), &QAction::triggered, this, [this, line]() {
+                line->clear();
+                line->insert("");
+                line->setModified(true);
+                ui->frameMiddle->setFocus();
+            });
+        }
+        if (!isVisible) {
+            line->setEnabled(true);
+            line->setVisible(false);
+        }
+    };
+    QList<QLineEdit*> videoMetadata = {
+        ui->lineVTitle,  ui->lineVName,  ui->lineVYear,
+        ui->lineVAuthor, ui->lineVPerf,  ui->lineVDescript
+    };
+    foreach (QLineEdit *lineEdit, videoMetadata)
+        connectAction(lineEdit, true);
+
+    Q_LOOP(i, VIDEO_TITLE, VIDEO_DESCRIPTION + 1) {
+        Q_ASSERT(i < 6);
+        connect(videoMetadata[i], &QLineEdit::editingFinished, this, [=](){
+            if (m_row != -1) {
+                if (videoMetadata[i]->isModified()) {
+                    videoMetadata[i]->setModified(false);
+                    const QString text = videoMetadata[i]->text();
+                    m_data[m_row].videoMetadata[VIDEO_TITLE + i] = text;
+                }
+            }
+        });
+    }
+
+    //******** Audio Elements **************//
+    m_pAudioLabel->setVisible(true);
+    //******* Subtitle Elements ************//
+    m_pSubtitleLabel->setVisible(true);
 }
 
-void Widget::desktopEnvDetection()
+void MainWindow::setParameters()    // Set parameters
 {
-#if defined (Q_OS_UNIX)
-    QProcess process_env;
-    process_env.setProcessChannelMode(QProcess::MergedChannels);
-    QStringList arguments;
-    arguments << "XDG_CURRENT_DESKTOP";
-    process_env.start("printenv", arguments);
-    if (process_env.waitForFinished()) {
-        QString line = process_env.readAllStandardOutput();
-        if (line.indexOf("GNOME") != -1) {
-            _desktopEnv = "gnome";
-        } else {
-            _desktopEnv = "other";
+    createConnections();
+    m_newParams.resize(PARAMETERS_COUNT);
+    m_curParams.resize(PARAMETERS_COUNT);
+    m_preset_table.resize(PARAMETERS_COUNT + 1);
+    Q_LOOP(i, 0, PARAMETERS_COUNT + 1)
+      m_preset_table[i].resize(5);
+
+    m_data.clear();
+    m_reportLog.clear();
+
+    //************** File Browser ******************//
+    m_pSpl = new QSplitter(Qt::Horizontal, ui->browserWidget);
+    ui->browserWidget->layout()->addWidget(m_pSpl);
+    m_pSpl->setHandleWidth(0);
+    m_pSpl->addWidget(ui->dirsWidget);
+    m_pSpl->addWidget(ui->filesWidget);
+
+    QStandardItemModel *model_d = new QStandardItemModel(this);
+    model_d->setHorizontalHeaderItem(0, new QStandardItem(tr("Folders")));
+    QHeaderView *hv_d = new QHeaderView(Qt::Horizontal, ui->dirsWidget);
+    QFont fnt = hv_d->font();
+    fnt.setItalic(true);
+    fnt.setBold(true);
+    hv_d->setFont(fnt);
+    hv_d->setFixedHeight(28);
+    hv_d->setModel(model_d);
+    hv_d->setSectionResizeMode(0, QHeaderView::Stretch);
+    ui->dirsLayout->addWidget(hv_d);
+
+    QStandardItemModel *model_f = new QStandardItemModel(this);
+    model_f->setHorizontalHeaderItem(0, new QStandardItem(tr("Files")));
+    QHeaderView *hv_f = new QHeaderView(Qt::Horizontal, ui->filesWidget);
+    hv_f->setFont(fnt);
+    hv_f->setFixedHeight(28);
+    hv_f->setModel(model_f);
+    hv_f->setSectionResizeMode(0, QHeaderView::Stretch);
+    ui->filesLayout->addWidget(hv_f);
+    setBrowser();
+    FileIconProvider *fip = new FileIconProvider();
+    m_pDirModel->setIconProvider(fip);
+    ui->lineEditFileFilter->hide();
+
+    //************** Combo boxes *******************//
+    auto comboBoxes = findChildren<QComboBox*>();
+    foreach (auto combo, comboBoxes) {
+        QListView *_view = new QListView(combo);
+        _view->setTextElideMode(Qt::ElideMiddle);
+        combo->setView(_view);
+    }
+    ui->comboBoxPreset->setVisible(false);
+
+    //********** Set default state *****************//
+    m_pAnimation = new QAnimatedSvg(ui->labelAnimation, QSize(18, 18));
+    setProgressEnabled(false);
+    m_pTableLabel->show();
+    m_pAudioLabel->show();
+    m_pSubtitleLabel->show();
+
+    //************ Create folders ******************//
+    if (!QDir(SETTINGSPATH).exists()) {
+        QDir().mkdir(SETTINGSPATH);
+        Print("Setting path not existed and was created ...");
+    }
+    if (QDir(THUMBNAILPATH).exists()) {
+        unsigned int count_thumb = QDir(THUMBNAILPATH).count();
+        if (count_thumb > 300) {
+            QDir(THUMBNAILPATH).removeRecursively();
+            Print("Thumbnails removed... ");
+        }
+    }
+    if (!QDir(THUMBNAILPATH).exists()) {
+        QDir().mkdir(THUMBNAILPATH);
+        Print("Thumbnail path not existed and was created ...");
+    }
+
+    //************** Read presets ******************//
+    QFile _prs_file(PRESETFILE);
+    if (_prs_file.open(QIODevice::ReadOnly)) {
+        QDataStream in(&_prs_file);
+        in.setVersion(QDataStream::Qt_4_0);
+        int ver;
+        in >> ver;
+        if (ver == PRESETS_VERSION) {
+            in >> m_curParams >> m_pos_top >> m_pos_cld >> m_preset_table;
+            _prs_file.close();
+        }
+        else {
+            _prs_file.close();
+            setDefaultPresets();
         }
     } else {
-        std::cout << "printenv not found" << std::endl;
-        _desktopEnv = "other";
-    }
-#else
-    _desktopEnv = "other";
-#endif
-}
-
-void Widget::createConnections()
-{
-    encoder = new Encoder(this);
-    connect(encoder, &Encoder::onEncodingMode, this, &Widget::onEncodingMode);
-    connect(encoder, &Encoder::onEncodingStarted, this, &Widget::onEncodingStarted);
-    connect(encoder, &Encoder::onEncodingInitError, this, &Widget::onEncodingInitError);
-    connect(encoder, &Encoder::onEncodingProgress, this, &Widget::onEncodingProgress);
-    connect(encoder, &Encoder::onEncodingLog, this, &Widget::onEncodingLog);
-    connect(encoder, &Encoder::onEncodingCompleted, this, &Widget::onEncodingCompleted);
-    connect(encoder, &Encoder::onEncodingAborted, this, &Widget::onEncodingAborted);
-    connect(encoder, &Encoder::onEncodingError, this, &Widget::onEncodingError);
-
-    timer = new QTimer(this);
-    connect(timer, SIGNAL(timeout()), this, SLOT(repeatHandler_Type_1()));
-    timerCallSetThumbnail = new QTimer(this);
-    timerCallSetThumbnail->setSingleShot(true);
-    timerCallSetThumbnail->setInterval(800);
-    connect(timerCallSetThumbnail, SIGNAL(timeout()), this, SLOT(repeatHandler_Type_2()));
-
-    // ***************************** Top menu actions ***********************************//
-
-    add_files = new QAction(tr("Add files"), this);
-    remove_files = new QAction(tr("Remove from the list"), this);
-    close_prog = new QAction(tr("Close"), this);
-    connect(add_files, &QAction::triggered, this, &Widget::on_actionAdd_clicked);
-    connect(remove_files, &QAction::triggered, this, &Widget::on_actionRemove_clicked);
-    connect(close_prog, &QAction::triggered, this, &Widget::on_closeWindow_clicked);
-
-    encode_files = new QAction(tr("Encode/Pause"), this);
-    stop_encode = new QAction(tr("Stop"), this);
-    connect(encode_files, &QAction::triggered, this, &Widget::on_actionEncode_clicked);
-    connect(stop_encode, &QAction::triggered, this, &Widget::on_actionStop_clicked);
-
-    edit_metadata = new QAction(tr("Edit metadata"), this);
-    select_audio = new QAction(tr("Select audio streams"), this);
-    select_subtitles = new QAction(tr("Select subtitles"), this);
-    split_video = new QAction(tr("Split video"), this);
-    connect(edit_metadata, &QAction::triggered, this, &Widget::showMetadataEditor);
-    connect(select_audio, &QAction::triggered, this, &Widget::showAudioStreamsSelection);
-    connect(select_subtitles, &QAction::triggered, this, &Widget::showSubtitlesSelection);
-    connect(split_video, &QAction::triggered, this, &Widget::showVideoSplitter);
-
-    settings = new QAction(tr("Settings"), this);
-    connect(settings, &QAction::triggered, this, &Widget::on_actionSettings_clicked);
-
-    reset_view = new QAction(tr("Reset state"), this);
-    connect(reset_view, &QAction::triggered, this, &Widget::resetView);
-
-    about = new QAction(tr("About"), this);
-    donate = new QAction(tr("Donate"), this);
-    connect(about, &QAction::triggered, this, &Widget::on_actionAbout_clicked);
-    connect(donate, &QAction::triggered, this, &Widget::on_actionDonate_clicked);
-
-    menuFiles = new QMenu(this);
-    menuFiles->addAction(add_files);
-    menuFiles->addAction(remove_files);
-    menuFiles->addSeparator();
-    menuFiles->addAction(close_prog);
-    ui->menuFileButton->setMenu(menuFiles);
-
-    menuEdit = new QMenu(this);
-    menuEdit->addAction(encode_files);
-    menuEdit->addAction(stop_encode);
-    ui->menuEditButton->setMenu(menuEdit);
-
-    menuTools = new QMenu(this);
-    menuTools->addAction(edit_metadata);
-    menuTools->addSeparator();
-    menuTools->addAction(select_audio);
-    menuTools->addAction(select_subtitles);
-    menuTools->addSeparator();
-    menuTools->addAction(split_video);
-    ui->menuToolsButton->setMenu(menuTools);
-
-    menuView = new QMenu(this);
-    for (int i = 0; i < DOCKS_COUNT; i++) {
-        menuView->addAction(docks[i]->toggleViewAction());
-    }
-    menuView->addAction(reset_view);
-    ui->menuViewButton->setMenu(menuView);
-    docks[DockIndex::LOG_DOCK]->toggleViewAction()->setChecked(false);
-    docks[DockIndex::SPLIT_DOCK]->toggleViewAction()->setChecked(false);
-    docks[DockIndex::LOG_DOCK]->setVisible(false);
-    docks[DockIndex::SPLIT_DOCK]->setVisible(false);
-
-    menuPreferences = new QMenu(this);
-    menuPreferences->addAction(settings);
-    ui->menuPreferencesButton->setMenu(menuPreferences);
-
-    menuAbout = new QMenu(this);
-    menuAbout->addAction(about);
-    menuAbout->addSeparator();
-    menuAbout->addAction(donate);
-    ui->menuAboutButton->setMenu(menuAbout);
-
-    // ***************************** Table menu actions ***********************************//
-
-    ui->tableWidget->setContextMenuPolicy(Qt::CustomContextMenu);
-    itemMenu = new QMenu(this);
-    itemMenu->addAction(remove_files);
-    itemMenu->addSeparator();
-    itemMenu->addAction(encode_files);
-    itemMenu->addSeparator();
-    itemMenu->addAction(edit_metadata);
-    itemMenu->addSeparator();
-    itemMenu->addAction(select_audio);
-    itemMenu->addAction(select_subtitles);
-    itemMenu->addSeparator();
-    itemMenu->addAction(split_video);
-    connect(ui->tableWidget, &QTableWidget::customContextMenuRequested, this, &Widget::provideContextMenu);
-
-    // ***************************** Tree menu actions ***********************************//
-
-    ui->treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
-    QAction* add_section = new QAction(tr("Add section"), this);
-    QAction* add_preset = new QAction(tr("Add preset"), this);
-    QAction* rename_section_preset = new QAction(tr("Rename"), this);
-    QAction* remove_section_preset = new QAction(tr("Remove"), this);
-    connect(add_section, &QAction::triggered, this, &Widget::add_section);
-    connect(add_preset, &QAction::triggered, this, &Widget::add_preset);
-    connect(rename_section_preset, &QAction::triggered, this, &Widget::renameSectionPreset);
-    connect(remove_section_preset, &QAction::triggered, this, &Widget::on_actionRemove_preset_clicked);
-
-    QAction* apply_preset = new QAction(tr("Apply"), this);
-    QAction* edit_preset = new QAction(tr("Edit"), this);
-    connect(apply_preset, &QAction::triggered, this, &Widget::on_buttonApplyPreset_clicked);
-    connect(edit_preset, &QAction::triggered, this, &Widget::on_actionEdit_preset_clicked);
-
-    sectionMenu = new QMenu(this);
-    sectionMenu->addAction(add_section);
-    sectionMenu->addAction(add_preset);
-    sectionMenu->addAction(rename_section_preset);
-    sectionMenu->addAction(remove_section_preset);
-
-    presetMenu = new QMenu(this);
-    presetMenu->addAction(add_section);
-    presetMenu->addAction(add_preset);
-    presetMenu->addAction(rename_section_preset);
-    presetMenu->addAction(remove_section_preset);
-    presetMenu->addSeparator();
-    presetMenu->addAction(apply_preset);
-    presetMenu->addAction(edit_preset);
-    connect(ui->treeWidget, &QTreeWidget::customContextMenuRequested, this, &Widget::providePresetContextMenu);
-
-    // ***************************** Preset menu actions ***********************************//
-
-    addsection = new QAction(tr("Add section"), this);
-    addpreset = new QAction(tr("Add new preset"), this);
-    addsection->setIcon(QIcon(":/resources/icons/16x16/cil-folder.png"));
-    addpreset->setIcon(QIcon(":/resources/icons/16x16/cil-file.png"));
-    connect(addsection, &QAction::triggered, this, &Widget::add_section);
-    connect(addpreset, &QAction::triggered, this, &Widget::add_preset);
-
-    menu = new QMenu(this);
-    menu->addAction(addsection);
-    menu->addSeparator();
-    menu->addAction(addpreset);
-    ui->actionAdd_preset->setMenu(menu);
-
-    // ************************ Metadata Elements Actions ****************************//
-
-    QList<QLineEdit *> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit *>();
-    foreach (QLineEdit *lineEdit, linesEditMetadata) {
-        QList<QAction*> actionList = lineEdit->findChildren<QAction*>();
-        if (!actionList.isEmpty()) {
-            connect(actionList.first(), &QAction::triggered, this, [this, lineEdit]() {
-            lineEdit->clear();
-            lineEdit->insert("");
-            lineEdit->setModified(true);
-            ui->frame_middle->setFocus();
-            });
-        }
+        setDefaultPresets();
     }
 
-    // ************************ Audio Elements Actions ****************************//
-    QList<QLabel*> labelsAudio = ui->frameTab_2->findChildren<QLabel*>();
-    foreach (QLabel *label, labelsAudio) {
-        label->setVisible(false);
-    }
-    audioThumb->setVisible(true);
-
-    for (int stream = 0; stream < AMOUNT_AUDIO_STREAMS; stream++) {
-        // Check Boxes
-        QCheckBox *checkBoxAudio = ui->frameTab_2->findChild<QCheckBox *>("checkBoxAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(checkBoxAudio, &QCheckBox::clicked, this, [this, checkBoxAudio, stream](){
-            if (_row != -1) {
-                QString state_qstr = "0";
-                int state = checkBoxAudio->checkState();
-                if (state == 2) {
-                    state_qstr = "1";
-                }
-                QTableWidgetItem *newItem_checkstate = new QTableWidgetItem(state_qstr);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_AUDIOCHECK_1 + stream, newItem_checkstate);
-                _audioStreamCheckState[stream] = state_qstr.toInt();
-            }
-        });
-        checkBoxAudio->setEnabled(true);
-        checkBoxAudio->setVisible(false);
-        // Line Edit Lang
-        QLineEdit *lineEditLangAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditLangAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(lineEditLangAudio, &QLineEdit::editingFinished, this, [this, lineEditLangAudio, stream](){
-            if (_row != -1) {
-                if (!lineEditLangAudio->isModified()) {
-                    return;
-                }
-                lineEditLangAudio->setModified(false);
-                QString langAudio = lineEditLangAudio->text();
-                QTableWidgetItem *newItem_langAudio = new QTableWidgetItem(langAudio);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_AUDIOLANG_1 + stream, newItem_langAudio);
-                _audioLang[stream] = langAudio;
-            }
-        });
-        QList<QAction*> actionLangAudioList = lineEditLangAudio->findChildren<QAction*>();
-        if (!actionLangAudioList.isEmpty()) {
-            connect(actionLangAudioList.first(), &QAction::triggered, this, [this, lineEditLangAudio]() {
-            lineEditLangAudio->clear();
-            lineEditLangAudio->insert("");
-            lineEditLangAudio->setModified(true);
-            ui->frame_middle->setFocus();
-            });
-        }
-        lineEditLangAudio->setEnabled(true);
-        lineEditLangAudio->setVisible(false);
-        // Line Edit Title
-        QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(lineEditTitleAudio, &QLineEdit::editingFinished, this, [this, lineEditTitleAudio, stream](){
-            if (_row != -1) {
-                if (!lineEditTitleAudio->isModified()) {
-                    return;
-                }
-                lineEditTitleAudio->setModified(false);
-                QString titleAudio = lineEditTitleAudio->text();
-                QTableWidgetItem *newItem_titleAudio = new QTableWidgetItem(titleAudio);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_AUDIOTITLE_1 + stream, newItem_titleAudio);
-                _audioTitle[stream] = titleAudio;
-            }
-        });
-        QList<QAction*> actionTitleAudioList = lineEditTitleAudio->findChildren<QAction*>();
-        if (!actionTitleAudioList.isEmpty()) {
-            connect(actionTitleAudioList.first(), &QAction::triggered, this, [this, lineEditTitleAudio]() {
-            lineEditTitleAudio->clear();
-            lineEditTitleAudio->insert("");
-            lineEditTitleAudio->setModified(true);
-            ui->frame_middle->setFocus();
-            });
-        }
-        lineEditTitleAudio->setEnabled(true);
-        lineEditTitleAudio->setVisible(false);
-    }
-
-    // ************************ Subtitle Elements Actions ****************************//
-    QList<QLabel*> labelsSubtitle = ui->frameTab_3->findChildren<QLabel*>();
-    foreach (QLabel *label, labelsSubtitle) {
-        label->setVisible(false);
-    }
-    subtitleThumb->setVisible(true);
-
-    for (int stream = 0; stream < AMOUNT_SUBTITLES; stream++) {
-        // Check Boxes
-        QCheckBox *checkBoxSubtitle = ui->frameTab_3->findChild<QCheckBox *>("checkBoxSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(checkBoxSubtitle, &QCheckBox::clicked, this, [this, checkBoxSubtitle, stream](){
-            if (_row != -1) {
-                QString state_qstr = "0";
-                int state = checkBoxSubtitle->checkState();
-                if (state == 2) {
-                    state_qstr = "1";
-                }
-                QTableWidgetItem *newItem_checkstate = new QTableWidgetItem(state_qstr);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_SUBCHECK_1 + stream, newItem_checkstate);
-                _subtitleCheckState[stream] = state_qstr.toInt();
-            }
-        });
-        checkBoxSubtitle->setEnabled(true);
-        checkBoxSubtitle->setVisible(false);
-        // Line Edit Lang
-        QLineEdit *lineEditLangSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditLangSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(lineEditLangSubtitle, &QLineEdit::editingFinished, this, [this, lineEditLangSubtitle, stream](){
-            if (_row != -1) {
-                if (!lineEditLangSubtitle->isModified()) {
-                    return;
-                }
-                lineEditLangSubtitle->setModified(false);
-                QString langSubtitle = lineEditLangSubtitle->text();
-                QTableWidgetItem *newItem_langSubtitle = new QTableWidgetItem(langSubtitle);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_SUBLANG_1 + stream, newItem_langSubtitle);
-                _subtitleLang[stream] = langSubtitle;
-            }
-        });
-        QList<QAction*> actionLangSubtitleList = lineEditLangSubtitle->findChildren<QAction*>();
-        if (!actionLangSubtitleList.isEmpty()) {
-            connect(actionLangSubtitleList.first(), &QAction::triggered, this, [this, lineEditLangSubtitle]() {
-            lineEditLangSubtitle->clear();
-            lineEditLangSubtitle->insert("");
-            lineEditLangSubtitle->setModified(true);
-            ui->frame_middle->setFocus();
-            });
-        }
-        lineEditLangSubtitle->setEnabled(true);
-        lineEditLangSubtitle->setVisible(false);
-        // Line Edit Title
-        QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        connect(lineEditTitleSubtitle, &QLineEdit::editingFinished, this, [this, lineEditTitleSubtitle, stream](){
-            if (_row != -1) {
-                if (!lineEditTitleSubtitle->isModified()) {
-                    return;
-                }
-                lineEditTitleSubtitle->setModified(false);
-                QString titleSubtitle = lineEditTitleSubtitle->text();
-                QTableWidgetItem *newItem_titleSubtitle = new QTableWidgetItem(titleSubtitle);
-                ui->tableWidget->setItem(_row, ColumnIndex::T_TITLESUB_1 + stream, newItem_titleSubtitle);
-                _subtitleTitle[stream] = titleSubtitle;
-            }
-        });
-        QList<QAction*> actionTitleSubtitleList = lineEditTitleSubtitle->findChildren<QAction*>();
-        if (!actionTitleSubtitleList.isEmpty()) {
-            connect(actionTitleSubtitleList.first(), &QAction::triggered, this, [this, lineEditTitleSubtitle]() {
-            lineEditTitleSubtitle->clear();
-            lineEditTitleSubtitle->insert("");
-            lineEditTitleSubtitle->setModified(true);
-            ui->frame_middle->setFocus();
-            });
-        }
-        lineEditTitleSubtitle->setEnabled(true);
-        lineEditTitleSubtitle->setVisible(false);
-    }
-}
-
-void Widget::setParameters()    /*** Set parameters ***/
-{
-    // ***************************** Set parameters ***********************************//
-    createConnections();
-    openingFiles.setParent(this);
-    openingFiles.setModal(true);
-    trayIcon = new QSystemTrayIcon(this);
-    _new_param.resize(PARAMETERS_COUNT);
-    _cur_param.resize(PARAMETERS_COUNT);
-    _preset_table.resize(PARAMETERS_COUNT+1);
-    for (int i = 0; i < PARAMETERS_COUNT+1; i++) {
-      _preset_table[i].resize(5);
-    }
-
-    // ****************************** Initialize variables ************************************//
-    QDesktopWidget *screenSize = QApplication::desktop();
-    int screenWidth = screenSize->width();
-    int screenHeight = screenSize->height();
-    int widthMainWindow = 1024;
-    int heightMainWindow = 650;
-    int x_pos = static_cast<int>(round(static_cast<float>(screenWidth - widthMainWindow)/2));
-    int y_pos = static_cast<int>(round(static_cast<float>(screenHeight - heightMainWindow)/2));
-    _desktopEnv = "default";
-    _settingsWindowGeometry = "default";
-    _presetWindowGeometry = "default";
-    _openDir = QDir::homePath();
-    _settings_path = QApplication::applicationDirPath() + QString("/settings");
-    _thumb_path = _settings_path + QString("/thumbnails");
-    _preset_file = _settings_path + QString("/presets.ini");
-    _settings = new QSettings(_settings_path + QString("/settings.ini"), QSettings::IniFormat, this);
-    _status_encode_btn = EncodingStatus::START;
-    _timer_interval = 30;
-    _curTime = 0;
-    _language = "";
-    _font = "";
-    _fontSize = 8;
-    _curFilename = "";
-    _curPath = "";
-    _input_file = "";
-    _output_folder = "";
-    _output_file = "";
-    _temp_folder = "";
-    _temp_file = "";
-    _prefixName = "output";
-    _suffixName = "_encoded_";
-    _prefxType = 0;
-    _suffixType = 0;
-    _pos_top = -1;
-    _pos_cld = -1;
-    _rowSize = 25;
-    _hideInTrayFlag = false;
-    _protection = false;
-    _black_borders = false;
-    _decode_with_qsv = false;
-    _batch_mode = false;
-    _showHDR_mode = false;
-    _row = -1;
-    _theme = 3;
-    QListView *comboboxPresetListView = new QListView(ui->comboBoxPreset);
-    QListView *comboboxModeListView = new QListView(ui->comboBoxMode);
-    QListView *comboboxViewListView = new QListView(ui->comboBoxView);
-    ui->comboBoxPreset->setView(comboboxPresetListView);
-    ui->comboBoxMode->setView(comboboxModeListView);
-    ui->comboBoxView->setView(comboboxViewListView);
-    ui->comboBoxPreset->setVisible(false);
-    ui->comboBoxView->setVisible(false);
-    animation = new QMovie(this);
-    animation->setFileName(":/resources/icons/Animated/cil-spinner-circle.gif");
-    animation->setScaledSize(QSize(18, 18));
-    processThumbCreation = new QProcess(this);
-
-    // ****************************** Setup widgets ************************************//
-    ui->labelAnimation->setMovie(animation);
-    ui->labelAnimation->hide();
-    ui->label_Progress->hide();
-    ui->label_Remaining->hide();
-    ui->label_RemTime->hide();
-    ui->progressBar->hide();
+    //*********** Table parameters ****************//
     ui->tableWidget->setRowCount(0);
+    ui->tableWidget->setShowGrid(false);
+    ui->tableWidget->horizontalHeader()->setFont(fnt);
     ui->tableWidget->horizontalHeader()->setVisible(true);
+    ui->tableWidget->verticalHeader()->setVisible(true);
     ui->tableWidget->setAlternatingRowColors(true);
-    ui->tableWidget->verticalHeader()->setFixedWidth(0);
+    ui->tableWidget->setDropIndicatorShown(true);
+    ui->tableWidget->setDragEnabled(true);
+    ui->tableWidget->setDragDropOverwriteMode(true);
+    ui->tableWidget->setDragDropMode(QAbstractItemView::DropOnly);
+    ui->tableWidget->setDefaultDropAction(Qt::TargetMoveAction);
     ui->tableWidget->setColumnWidth(ColumnIndex::FILENAME, 250);
     ui->tableWidget->setColumnWidth(ColumnIndex::FORMAT, 80);
     ui->tableWidget->setColumnWidth(ColumnIndex::RESOLUTION, 85);
@@ -769,143 +739,101 @@ void Widget::setParameters()    /*** Set parameters ***/
     ui->tableWidget->setColumnWidth(ColumnIndex::STATUS, 80);
     ui->tableWidget->setIconSize(QSize(16, 16));
 
-    for (int i = ColumnIndex::COLORRANGE; i <= ColumnIndex::MAXFALL; i++) {
+    for (int i = ColumnIndex::COLORRANGE; i <= ColumnIndex::MAXFALL; i++)
         ui->tableWidget->setColumnWidth(i, 82);
-    }
 
-    for (int i = ColumnIndex::BITRATE; i <= ColumnIndex::COLORSPACE; i++) {
+    for (int i = ColumnIndex::BITRATE; i <= ColumnIndex::COLORSPACE; i++)
         ui->tableWidget->hideColumn(i);
-    }
 
-    for (int i = ColumnIndex::T_DUR; i <= ColumnIndex::T_ENDTIME; i++) {
+    for (int i = ColumnIndex::T_DUR; i <= ColumnIndex::T_ID; i++)
         ui->tableWidget->hideColumn(i);
-    }
 
-    // ****************************** Create folders ************************************//
-    if (!QDir(_settings_path).exists()) {
-        QDir().mkdir(_settings_path);
-        std::cout << "Setting path not existed and was created ..." << std::endl;  // Debug info //
-    }
-    if (QDir(_thumb_path).exists()) {
-        unsigned int count_thumb = QDir(_thumb_path).count();
-        std::cout << "Number of thumbnails: " << count_thumb << std::endl; // Debug info //
-        if (count_thumb > 300) {
-            QDir(_thumb_path).removeRecursively();
-            std::cout << "Thumbnails removed... " << std::endl; // Debug info //
-        }
-    }
-    if (!QDir(_thumb_path).exists()) {
-        QDir().mkdir(_thumb_path);
-        std::cout << "Thumbnail path not existed and was created ..." << std::endl;  // Debug info //
-    }
-
-    // ****************************** Read presets ************************************//
-    QFile _prs_file(_preset_file);
-    if (_prs_file.open(QIODevice::ReadOnly)) {
-        QDataStream in(&_prs_file);
-        in.setVersion(QDataStream::Qt_4_0);
-        int ver;
-        in >> ver;
-        if (ver == PRESETS_VERSION) {
-            in >> _cur_param >> _pos_top >> _pos_cld >> _preset_table;
-            _prs_file.close();
-        }
-        else {
-            _prs_file.close();
-            set_defaults();
-        }
-
-    } else {
-        set_defaults();
-    }
-
-    // ************************** Read settings ******************************//
-    QList<int> dockSizesX = {};
-    QList<int> dockSizesY = {};
-    if (_settings->value("Version").toInt() == SETTINGS_VERSION) {
-        // Restore Main Widget
-        _settings->beginGroup("MainWidget");
-        this->restoreGeometry(_settings->value("MainWidget/geometry").toByteArray());
-        _settings->endGroup();
-
-        // Restore Main Window
-        _settings->beginGroup("MainWindow");
-        window->restoreState(_settings->value("MainWindow/state").toByteArray());
-        int arraySize = _settings->beginReadArray("MainWindow/docks_geometry");
+    //************* Read settings ******************//
+    const QString sysLang = Helper::getSysLanguage();
+    QList<int> dockSizesX{};
+    QList<int> dockSizesY{};
+    SETTINGS(stn);
+    if (stn.value("Version").toInt() == SETTINGS_VERSION) {
+        // Restore Window
+        stn.beginGroup("Window");
+        restoreGeometry(stn.value("Window/geometry").toByteArray());
+        stn.endGroup();
+        // Restore DocksContainer
+        stn.beginGroup("DocksContainer");
+        m_pDocksContainer->restoreState(stn.value("DocksContainer/state").toByteArray());
+        int arraySize = stn.beginReadArray("DocksContainer/docks_geometry");
             for (int i = 0; i < arraySize && i < DOCKS_COUNT; i++) {
-                _settings->setArrayIndex(i);
-                QSize size = _settings->value("MainWindow/docks_geometry/dock_size").toSize();
+                stn.setArrayIndex(i);
+                QSize size = stn.value("DocksContainer/docks_geometry/dock_size").toSize();
                 dockSizesX.append(size.width());
                 dockSizesY.append(size.height());
             }
-            _settings->endArray();
-        _settings->endGroup();
-
+            stn.endArray();
+        stn.endGroup();
         // Restore Tables
-        _settings->beginGroup("Tables");
-        ui->tableWidget->horizontalHeader()->restoreState(_settings->value("Tables/table_widget_state").toByteArray());
-        ui->treeWidget->header()->restoreState(_settings->value("Tables/tree_widget_state").toByteArray());
-        _settings->endGroup();
-
-        // Restore Settings Widget
-        _settings->beginGroup("SettingsWidget");
-        _settingsWindowGeometry = _settings->value("SettingsWidget/geometry").toByteArray();
-        _settings->endGroup();
-
-        // Restore Preset Widget
-        _settings->beginGroup("PresetWidget");
-        _presetWindowGeometry = _settings->value("PresetWidget/geometry").toByteArray();
-        _settings->endGroup();
-
+        stn.beginGroup("Tables");
+        ui->tableWidget->horizontalHeader()->restoreState(stn.value("Tables/table_widget_state").toByteArray());
+        ui->treeWidget->header()->restoreState(stn.value("Tables/tree_widget_state").toByteArray());
+        m_pSpl->restoreState(stn.value("Tables/splitter_state").toByteArray());
+        m_pSplSource->restoreState(stn.value("Tables/splitter_source_state").toByteArray());
+        stn.endGroup();
         // Restore Settings
-        _settings->beginGroup("Settings");
-        _prefxType = _settings->value("Settings/prefix_type").toInt();
-        _suffixType = _settings->value("Settings/suffix_type").toInt();
-        _prefixName = _settings->value("Settings/prefix_name").toString();
-        _suffixName = _settings->value("Settings/suffix_name").toString();
-        _timer_interval = _settings->value("Settings/timer_interval").toInt();
-        _theme = _settings->value("Settings/theme").toInt();
-        _protection = _settings->value("Settings/protection").toBool();
-        _black_borders = _settings->value("Settings/black_borders").toBool();
-        _decode_with_qsv = _settings->value("Settings/decode_with_qsv").toBool();
-        _showHDR_mode = _settings->value("Settings/show_hdr_mode").toBool();
-        _temp_folder = _settings->value("Settings/temp_folder").toString();
-        _output_folder = _settings->value("Settings/output_folder").toString();
-        _openDir = _settings->value("Settings/open_dir").toString();
-        _batch_mode = _settings->value("Settings/batch_mode").toBool();
-        _hideInTrayFlag = _settings->value("Settings/tray").toBool();
-        _language = _settings->value("Settings/language").toString();
-        _font = _settings->value("Settings/font").toString();
-        _fontSize = _settings->value("Settings/font_size").toInt();
-        _desktopEnv = _settings->value("Settings/enviroment").toString();
-        _rowSize = _settings->value("Settings/row_size").toInt();
-        _settings->endGroup();
+        stn.beginGroup("Settings");
+        m_prefxType = stn.value("Settings/prefix_type").toInt();
+        m_suffixType = stn.value("Settings/suffix_type").toInt();
+        m_prefixName = stn.value("Settings/prefix_name").toString();
+        m_suffixName = stn.value("Settings/suffix_name").toString();
+        m_timerInterval = stn.value("Settings/timer_interval").toInt();
+        m_theme = stn.value("Settings/theme").toInt();
+        m_protectFlag = stn.value("Settings/protection").toBool();
+        _black_borders = stn.value("Settings/black_borders").toBool();
+        _decode_with_qsv = stn.value("Settings/decode_with_qsv").toBool();
+        m_multiInstances = stn.value("Settings/allow_duplicates", false).toBool();
+        m_showHdrFlag = stn.value("Settings/show_hdr_mode").toBool();
+        m_temp_folder = stn.value("Settings/temp_folder").toString();
+        m_output_folder = stn.value("Settings/output_folder").toString();
+        m_openDir = stn.value("Settings/open_dir").toString();
+        m_batch_mode = stn.value("Settings/batch_mode").toBool();
+        m_hideInTrayFlag = stn.value("Settings/tray").toBool();
+        m_language = stn.value("Settings/language", sysLang).toString();
+        m_font = stn.value("Settings/font").toString();
+        m_fontSize = stn.value("Settings/font_size", FONTSIZE).toInt();
+        m_rowHeight = stn.value("Settings/row_size").toInt();
+        ui->switchViewMode->setCurrentIndex(stn.value("Settings/switch_view_mode", 0).toInt());
+        ui->switchCutting->setCurrentIndex(stn.value("Settings/switch_cut_mode", 0).toInt());
+        stn.endGroup();
 
     } else {
-        this->setGeometry(x_pos, y_pos, widthMainWindow, heightMainWindow);
+        const QSize delta = QApplication::desktop()->size() - WINDOW_SIZE;
+        const QPointF topLeft(float(delta.width())/2, float(delta.height())/2);
+        const QRect rect(topLeft.toPoint(), WINDOW_SIZE);
+        setGeometry(rect);
+
+        ui->treeWidget->setColumnWidth(0, 230);
+        ui->treeWidget->setColumnWidth(1, 55);
+        ui->treeWidget->setColumnWidth(2, 55);
+        ui->treeWidget->setColumnWidth(3, 55);
+        ui->treeWidget->setColumnWidth(4, 55);
+        ui->treeWidget->setColumnWidth(5, 55);
+        ui->treeWidget->setColumnWidth(6, 55);
     }
 
-    // ***************************** Preset parameters ***********************************//
+    //*********** Preset parameters ****************//
     ui->treeWidget->clear();
+    ui->treeWidget->header()->setFont(fnt);
     ui->treeWidget->setHeaderHidden(false);
     ui->treeWidget->setAlternatingRowColors(true);
-    ui->treeWidget->setColumnWidth(0, 230);
-    ui->treeWidget->setColumnWidth(1, 55);
-    ui->treeWidget->setColumnWidth(2, 55);
-    ui->treeWidget->setColumnWidth(3, 55);
-    ui->treeWidget->setColumnWidth(4, 55);
-    ui->treeWidget->setColumnWidth(5, 55);
-    ui->treeWidget->setColumnWidth(6, 55);
-    int NUM_ROWS = _preset_table[0].size();
-    int NUM_COLUMNS = _preset_table.size();
+    int NUM_ROWS = m_preset_table[0].size();
+    int NUM_COLUMNS = m_preset_table.size();
     QString type;
     QFont parentFont;
     parentFont.setBold(true);
+    parentFont.setItalic(true);
     for (int i = 0; i < NUM_ROWS; i++) {
-        type = _preset_table[PARAMETERS_COUNT][i];
+        type = m_preset_table[PARAMETERS_COUNT][i];
         if (type == "TopLewelItem") {
             QTreeWidgetItem *root = new QTreeWidgetItem();
-            root->setText(0, _preset_table[0][i]);
+            root->setText(0, m_preset_table[0][i]);
             root->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
             root->setFont(0, parentFont);
             setPresetIcon(root, true);
@@ -916,39 +844,37 @@ void Widget::setParameters()    /*** Set parameters ***/
         if (type == "ChildItem") {
             QTreeWidgetItem *item = ui->treeWidget->currentItem();
             QTreeWidgetItem *child = new QTreeWidgetItem();
-            for (int j = 0; j < PARAMETERS_COUNT; j++) {
-                child->setText(j + 7, _preset_table[j][i]);
-            }
+            for (int j = 0; j < PARAMETERS_COUNT; j++)
+                child->setText(j + 7, m_preset_table[j][i]);
             QString savedPresetName = child->text(30 + 7);
             child->setText(0, savedPresetName);
-            updateInfoFields(_preset_table[1][i],
-                             _preset_table[2][i],
-                             _preset_table[3][i],
-                             _preset_table[4][i],
-                             _preset_table[11][i],
-                             _preset_table[12][i],
-                             _preset_table[21][i],
+            updateInfoFields(m_preset_table[1][i],
+                             m_preset_table[2][i],
+                             m_preset_table[3][i],
+                             m_preset_table[4][i],
+                             m_preset_table[11][i],
+                             m_preset_table[12][i],
+                             m_preset_table[21][i],
                              child, false);
             setItemStyle(child);
             item->addChild(child);
         }
     }
-    if (_pos_top != -1 && _pos_cld != -1) {
-        QTreeWidgetItem *item = ui->treeWidget->topLevelItem(_pos_top)->child(_pos_cld);
-        ui->treeWidget->setCurrentItem(item);
+    if (m_pos_top != -1 && m_pos_cld != -1) {
+        QTreeWidgetItem *__item = ui->treeWidget->topLevelItem(m_pos_top)->child(m_pos_cld);
+        ui->treeWidget->setCurrentItem(__item);
     }
-    std::cout << NUM_ROWS << " x " << NUM_COLUMNS << std::endl; // Table size
-    for (int i = 7; i <= 40; i++) {
+    Print(NUM_ROWS << " x " << NUM_COLUMNS);
+    Q_LOOP(i, 7, 41)
         ui->treeWidget->hideColumn(i);
-    }
 
-    // ***************************** Other parameters ***********************************//
+    //*********** Other parameters *****************//
     if (dockSizesX.count() < DOCKS_COUNT || dockSizesY.count() < DOCKS_COUNT) {
-        float coeffX[DOCKS_COUNT] = {0.25f, 0.04f, 0.48f, 0.48f, 0.25f, 0.25f, 0.25f, 0.25f};
-        float coeffY[DOCKS_COUNT] = {0.9f, 0.1f, 0.1f, 0.1f, 0.9f, 0.9f, 0.9f, 0.9f};
-        for (int ind = 0; ind < DOCKS_COUNT; ind++) {
-            int dockWidth = static_cast<int>(coeffX[ind] * widthMainWindow);
-            int dockHeight = static_cast<int>(coeffY[ind] * heightMainWindow);
+        float coeffX[DOCKS_COUNT] = {0.39f, 0.39f, 0.61f, 0.23f, 0.23f, 0.23f, 0.23f, 0.39f};
+        float coeffY[DOCKS_COUNT] = {0.16f, 0.5f, 0.1f, 0.9f, 0.9f, 0.9f, 0.9f, 0.3f};
+        Q_LOOP(i, 0, DOCKS_COUNT) {
+            const int dockWidth = static_cast<int>(coeffX[i] * WINDOW_SIZE.width());
+            const int dockHeight = static_cast<int>(coeffY[i] * WINDOW_SIZE.height());
             dockSizesX.append(dockWidth);
             dockSizesY.append(dockHeight);
         }
@@ -957,1667 +883,1214 @@ void Widget::setParameters()    /*** Set parameters ***/
         setDocksParameters(dockSizesX, dockSizesY);
     });
 
-    if (_timer_interval < 15) _timer_interval = 30;
-    timer->setInterval(_timer_interval*1000);
+    if (m_timerInterval < 15)
+        m_timerInterval = 30;
+    m_pTimer->setInterval(m_timerInterval*1000);
 
-    if (_rowSize != 0) ui->horizontalSlider_resize->setValue(_rowSize);
+    if (m_rowHeight != 0)
+        ui->sliderResize->setValue(m_rowHeight);
 
-    if (_fontSize == 0) _fontSize = 8;
+    m_expandWindowsState = isMaximized() ? true : false;
 
-    if (_language == "") {
-        QLocale locale = QLocale::system();
-        QMap<int, QString> langIndex;
-        langIndex[QLocale::Chinese] = "zh";
-        langIndex[QLocale::German] = "de";
-        langIndex[QLocale::Russian] = "ru";
-        if (langIndex.contains(locale.language())) {
-            _language = langIndex.value(locale.language());
-        } else {
-            _language = "en";
-        }
-    }
-
-    if (_desktopEnv == "default") {
-        std::cout << "Detect desktop env. ..." << std::endl;
-        desktopEnvDetection();
-    }
-    std::cout << "Desktop env.: " << _desktopEnv.toStdString() << std::endl;
-
-    if (this->isMaximized()) {
-        _expandWindowsState = true;
-        layout()->setMargin(0);
-    }
-
-    if (_batch_mode) {
+    if (m_batch_mode) {
         ui->comboBoxMode->blockSignals(true);
         ui->comboBoxMode->setCurrentIndex(1);
         ui->comboBoxMode->blockSignals(false);
     }
-    setTrayIconActions();
-    showTrayIcon();
-    if (_hideInTrayFlag) trayIcon->show();
-    setTheme(_theme);
+    setTrayIcon();
+    if (m_hideInTrayFlag)
+        m_pTrayIcon->show();
+    if (m_theme > 1)
+        m_theme = 1;
+    setTheme(m_theme);
+    Print("Desktop env.: " << short(Helper::getEnv()));
+
+    ui->treeDirs->setRootIndex(m_pDirModel->setRootPath(m_openDir));
+    ui->listFiles->setRootIndex(m_pFileModel->setRootPath(m_openDir));
 }
 
-void Widget::setDocksParameters(QList<int> dockSizesX, QList<int> dockSizesY)
+void MainWindow::setDocksParameters(QList<int> dockSizesX, QList<int> dockSizesY)
 {
-    // ************************** Set Docks Parameters ********************************//
     QList<QDockWidget*> docksVis;
     QList<int> dockVisSizesX;
     QList<int> dockVisSizesY;
-    for (int i = 0; i < DOCKS_COUNT; i++) {
-        if (docks[i]->isVisible() && !docks[i]->isFloating()){
-            docksVis.append(docks[i]);
+    Q_LOOP(i, 0, DOCKS_COUNT) {
+        if (m_pDocks[i]->isVisible() && !m_pDocks[i]->isFloating()){
+            docksVis.append(m_pDocks[i]);
             dockVisSizesX.append(dockSizesX.at(i));
             dockVisSizesY.append(dockSizesY.at(i));
         }
     }
-    window->resizeDocks(docksVis, dockVisSizesX, Qt::Horizontal);
-    window->resizeDocks(docksVis, dockVisSizesY, Qt::Vertical);
-    for (int i = 0; i < DOCKS_COUNT; i++) {
-        if (docks[i]->isVisible() && docks[i]->isFloating()){
-            docks[i]->setFloating(false); // Bypassing the error with detached docks in some Linux distributions
-            docks[i]->setFloating(true);
+    m_pDocksContainer->resizeDocks(docksVis, dockVisSizesX, Qt::Horizontal);
+    m_pDocksContainer->resizeDocks(docksVis, dockVisSizesY, Qt::Vertical);
+    Q_LOOP(i, 0, DOCKS_COUNT) {
+        if (m_pDocks[i]->isVisible() && m_pDocks[i]->isFloating()){
+            m_pDocks[i]->setFloating(false); // Bypassing the error with detached docks in some Linux distributions
+            m_pDocks[i]->setFloating(true);
         }
     }
 }
 
-void Widget::on_closeWindow_clicked()    /*** Close window signal ***/
+void MainWindow::onCloseWindow()    // Close window
 {
     this->close();
 }
 
-void Widget::setExpandIcon()
+void MainWindow::setExpandIcon()
 {
-    switch (_theme) {
-    case Theme::GRAY:
-    case Theme::DARK:
-    case Theme::WAVE:
-        if (_expandWindowsState) {
-            ui->expandWindow->setIcon(QIcon(":/resources/icons/16x16/cil-clone.png"));
-        } else {
-            ui->expandWindow->setIcon(QIcon(":/resources/icons/16x16/cil-media-stop.png"));}
-        break;
-    case Theme::DEFAULT:
-        if (_expandWindowsState) {
-            ui->expandWindow->setIcon(QIcon(":/resources/icons/16x16/cil-clone_black.png"));
-        } else {
-            ui->expandWindow->setIcon(QIcon(":/resources/icons/16x16/cil-media-stop_black.png"));}
-        break;
-    }
+    ui->expandWindow->setProperty("expanded", isMaximized() ? true : false);
+    ui->expandWindow->style()->polish(ui->expandWindow);
 }
 
-void Widget::on_expandWindow_clicked()    /*** Expand window ***/
+void MainWindow::onHideWindow()    // Hide window
 {
-    if (!this->isMaximized()) {
-        _expandWindowsState = true;
-        layout()->setMargin(0);
-        this->showMaximized();
-    } else {
-        _expandWindowsState = false;
-        layout()->setMargin(6);
-        this->showNormal();
-    }
-    setExpandIcon();
+    m_hideInTrayFlag ? hide() : showMinimized();
 }
 
-void Widget::on_hideWindow_clicked()    /*** Hide window ***/
+void MainWindow::onReport()
 {
-    if (_hideInTrayFlag) {
-        this->hide();
-    } else {
-        this->showMinimized();
-    }
+    Report *rpt = new Report(this, m_reportLog);
+    rpt->show();
 }
 
-void Widget::on_actionAbout_clicked()   /*** About ***/
+void MainWindow::onRestoreWindowState()
 {
-    About about(this);
-    about.setModal(true);
-    about.setParameters();
+    m_expandWindowsState ? showMaximized() : showNormal();
+}
+
+void MainWindow::onActionAbout()   // About
+{
+    Notification about(this, MessConf::CloseOnly, tr("ABOUT"));
     about.exec();
 }
 
-void Widget::on_actionDonate_clicked()   /*** Donate ***/
+void MainWindow::onActionDonate()   // Donate
 {
-    Donate donate(this);
-    donate.setModal(true);
-    donate.setParameters();
+    Notification donate(this, MessConf::AllBtns, tr("DONATE"));
     donate.exec();
 }
 
-void Widget::on_actionSettings_clicked()
+void MainWindow::onSettings()
 {
     Settings settings(this);
-    settings.setParameters(&_settingsWindowGeometry,
-                           &_output_folder,
-                           &_temp_folder,
-                           &_protection,
+    settings.setParameters(&m_output_folder,
+                           &m_temp_folder,
+                           &m_protectFlag,
+                           &m_multiInstances,
                            &_black_borders,
                            &_decode_with_qsv,
-                           &_showHDR_mode,
-                           &_timer_interval,
-                           &_theme,
-                           &_prefixName,
-                           &_suffixName,
-                           &_prefxType,
-                           &_suffixType,
-                           &_hideInTrayFlag,
-                           &_language,
-                           _desktopEnv,
-                           &_fontSize,
-                           &_font);
-    settings.setModal(true);
-    if (settings.exec() == QDialog::Accepted) {
-        timer->setInterval(_timer_interval*1000);
-        setTheme(_theme);
-        if (_hideInTrayFlag) {
-            trayIcon->show();
-        } else {
-            trayIcon->hide();
-        }
-        if (_row != -1) {
+                           &m_showHdrFlag,
+                           &m_timerInterval,
+                           &m_theme,
+                           &m_prefixName,
+                           &m_suffixName,
+                           &m_prefxType,
+                           &m_suffixType,
+                           &m_hideInTrayFlag,
+                           &m_language,
+                           &m_fontSize,
+                           &m_font);
+    if (settings.exec() == Dialog::Accept) {
+        m_pTimer->setInterval(m_timerInterval*1000);
+        setTheme(m_theme);
+        m_hideInTrayFlag ? m_pTrayIcon->show() : m_pTrayIcon->hide();
+        if (m_row != -1)
             get_output_filename();
-        }
-        _message = tr("You need to restart the program for the settings to take effect.");
-        call_task_complete(_message, false);
+        showPopup(tr("You need to restart the program for the settings to take effect."),
+                  PopupMessage::Icon::Warning);
     }
 }
 
-void Widget::showOpeningFiles(bool status)
+void MainWindow::setFloating(const int index, const QPoint &offset, const QSize &size)
 {
-    QPoint position;
-    QPoint posMainWindow = this->rect().topLeft();
-    QSize sizeMainWindow = this->size();
-    int x_pos = posMainWindow.x() + static_cast<int>(round(static_cast<float>(sizeMainWindow.width())/2));
-    int y_pos = posMainWindow.y() + static_cast<int>(round(static_cast<float>(sizeMainWindow.height())/2));
-    position.setX(x_pos);
-    position.setY(y_pos);
-    openingFiles.setParameters(status, position);
+    if (!m_pDocks[index]->isVisible())
+        m_pDocks[index]->setVisible(true);
+    m_pDocks[index]->setFloating(true);
+    m_pDocks[index]->move(this->geometry().center() + offset);
+    m_pDocks[index]->resize(size);
 }
 
-void Widget::showOpeningFiles(QString text)
+void MainWindow::showMetadataEditor()
 {
-    openingFiles.setText(text);
+    setFloating(DockIndex::METADATA_DOCK, QPoint(200,-200), QSize(300,500));
 }
 
-void Widget::showOpeningFiles(int percent)
+void MainWindow::showAudioStreams()
 {
-    openingFiles.setPercent(percent);
+    setFloating(DockIndex::STREAMS_DOCK, QPoint(220,-180), QSize(300,500));
+    ui->tabWidgetStreams->setCurrentIndex(0);
 }
 
-void Widget::showMetadataEditor()
+void MainWindow::showSubtitles()
 {
-    if (!docks[DockIndex::METADATA_DOCK]->isVisible()) {
-        docks[DockIndex::METADATA_DOCK]->setVisible(true);
-    }
-    docks[DockIndex::METADATA_DOCK]->setFloating(true);
+    setFloating(DockIndex::STREAMS_DOCK, QPoint(220,-180), QSize(300,500));
+    ui->tabWidgetStreams->setCurrentIndex(1);
 }
 
-void Widget::showAudioStreamsSelection()
+void MainWindow::showVideoSplitter()
 {
-    if (!docks[DockIndex::STREAMS_DOCK]->isVisible()) {
-        docks[DockIndex::STREAMS_DOCK]->setVisible(true);
-    }
-    docks[DockIndex::STREAMS_DOCK]->setFloating(true);
-    ui->tabWidgetRight->setCurrentIndex(0);
+    setFloating(DockIndex::SPLIT_DOCK, QPoint(240,-160), QSize(400,395));
 }
 
-void Widget::showSubtitlesSelection()
+void MainWindow::get_current_data() // Get current data
 {
-    if (!docks[DockIndex::STREAMS_DOCK]->isVisible()) {
-        docks[DockIndex::STREAMS_DOCK]->setVisible(true);
-    }
-    docks[DockIndex::STREAMS_DOCK]->setFloating(true);
-    ui->tabWidgetRight->setCurrentIndex(1);
-}
+    m_dur = GETTEXT(m_row, T_DUR).toDouble();
+    m_stream_size = GETTEXT(m_row, T_STREAMSIZE);
+    m_width = GETTEXT(m_row, T_WIDTH);
+    m_height = GETTEXT(m_row, T_HEIGHT);
+    m_fmt = GETTEXT(m_row, FORMAT);
+    m_fps = GETTEXT(m_row, FPS);
 
-void Widget::showVideoSplitter()
-{
-    if (!docks[DockIndex::SPLIT_DOCK]->isVisible()) {
-        docks[DockIndex::SPLIT_DOCK]->setVisible(true);
-    }
-    docks[DockIndex::SPLIT_DOCK]->setFloating(true);
-}
+    const double fps_double = m_fps.toDouble();
+    m_fr_count = static_cast<int>(round(m_dur * fps_double));
+    m_startTime =  GETTEXT(m_row, T_STARTTIME).toDouble();
+    m_endTime = GETTEXT(m_row, T_ENDTIME).toDouble();
 
-void Widget::get_current_data() /*** Get current data ***/
-{
-    _dur = (ui->tableWidget->item(_row, ColumnIndex::T_DUR)->text()).toDouble();
-    _stream_size = ui->tableWidget->item(_row, ColumnIndex::T_STREAMSIZE)->text();
-    _width = ui->tableWidget->item(_row, ColumnIndex::T_WIDTH)->text();
-    _height = ui->tableWidget->item(_row, ColumnIndex::T_HEIGHT)->text();
-    _fmt = ui->tableWidget->item(_row, ColumnIndex::FORMAT)->text();
-    _fps = ui->tableWidget->item(_row, ColumnIndex::FPS)->text();
+    QString curCodec = m_fmt;
+    QString curFps = m_fps;
+    QString curRes = GETTEXT(m_row, RESOLUTION);
+    QString curAr = GETTEXT(m_row, AR);
+    QString curBitrate = GETTEXT(m_row, BITRATE);
+    QString curColorSampling = GETTEXT(m_row, SUBSAMPLING);
+    QString curDepth = GETTEXT(m_row, BITDEPTH);
+    QString curSpace = GETTEXT(m_row, COLORSPACE);
 
-    double fps_double = _fps.toDouble();
-    _fr_count = static_cast<int>(round(_dur * fps_double));
+    m_curPath = GETTEXT(m_row, PATH);
+    m_curFilename = GETTEXT(m_row, FILENAME);
+    m_input_file = m_curPath + QString("/") + m_curFilename;
+    m_hdr[CUR_COLOR_RANGE] = GETTEXT(m_row, COLORRANGE);
+    m_hdr[CUR_COLOR_PRIMARY] = GETTEXT(m_row, COLORPRIM);
+    m_hdr[CUR_COLOR_MATRIX] = GETTEXT(m_row, COLORMATRIX);
+    m_hdr[CUR_TRANSFER] = GETTEXT(m_row, TRANSFER);
+    m_hdr[CUR_MAX_LUM] = GETTEXT(m_row, MAXLUM);
+    m_hdr[CUR_MIN_LUM] = GETTEXT(m_row, MINLUM);
+    m_hdr[CUR_MAX_CLL] = GETTEXT(m_row, MAXCLL);
+    m_hdr[CUR_MAX_FALL] = GETTEXT(m_row, MAXFALL);
+    m_hdr[CUR_MASTER_DISPLAY] = GETTEXT(m_row, MASTERDISPLAY);
+    m_hdr[CUR_CHROMA_COORD] = GETTEXT(m_row, T_CHROMACOORD);
+    m_hdr[CUR_WHITE_COORD] = GETTEXT(m_row, T_WHITECOORD);
 
-    _startTime = (ui->tableWidget->item(_row, ColumnIndex::T_STARTTIME)->text()).toDouble();
-    _endTime = (ui->tableWidget->item(_row, ColumnIndex::T_ENDTIME)->text()).toDouble();
-
-    //std::cout << "DURATION SEC COUNT <<<<<<<<<<<<<<<<<< : " << _dur << std::endl;
-    //std::cout << "FRAME RATE COUNT <<<<<<<<<<<<<<<<<< : " << _fr_count << std::endl;
-
-    QString curCodec = _fmt;
-    QString curFps = _fps;
-    QString curRes = ui->tableWidget->item(_row, ColumnIndex::RESOLUTION)->text();
-    QString curAr = ui->tableWidget->item(_row, ColumnIndex::AR)->text();
-    QString curBitrate = ui->tableWidget->item(_row, ColumnIndex::BITRATE)->text();
-    QString curColorSampling = ui->tableWidget->item(_row, ColumnIndex::SUBSAMPLING)->text();
-    QString curDepth = ui->tableWidget->item(_row, ColumnIndex::BITDEPTH)->text();
-    QString curSpace = ui->tableWidget->item(_row, ColumnIndex::COLORSPACE)->text();
-
-    _curPath = ui->tableWidget->item(_row, ColumnIndex::PATH)->text();
-    _curFilename = ui->tableWidget->item(_row, ColumnIndex::FILENAME)->text();
-    _input_file = _curPath + QString("/") + _curFilename;
-    _hdr[CUR_COLOR_RANGE] = ui->tableWidget->item(_row, ColumnIndex::COLORRANGE)->text();       // color range
-    _hdr[CUR_COLOR_PRIMARY] = ui->tableWidget->item(_row, ColumnIndex::COLORPRIM)->text();      // color primary
-    _hdr[CUR_COLOR_MATRIX] = ui->tableWidget->item(_row, ColumnIndex::COLORMATRIX)->text();     // color matrix
-    _hdr[CUR_TRANSFER] = ui->tableWidget->item(_row, ColumnIndex::TRANSFER)->text();            // transfer
-    _hdr[CUR_MAX_LUM] = ui->tableWidget->item(_row, ColumnIndex::MAXLUM)->text();               // max lum
-    _hdr[CUR_MIN_LUM] = ui->tableWidget->item(_row, ColumnIndex::MINLUM)->text();               // min lum
-    _hdr[CUR_MAX_CLL] = ui->tableWidget->item(_row, ColumnIndex::MAXCLL)->text();               // max cll
-    _hdr[CUR_MAX_FALL] = ui->tableWidget->item(_row, ColumnIndex::MAXFALL)->text();             // max fall
-    _hdr[CUR_MASTER_DISPLAY] = ui->tableWidget->item(_row, ColumnIndex::MASTERDISPLAY)->text(); // master display
-    _hdr[CUR_CHROMA_COORD] = ui->tableWidget->item(_row, ColumnIndex::T_CHROMACOORD)->text();   // chr coord
-    _hdr[CUR_WHITE_COORD] = ui->tableWidget->item(_row, ColumnIndex::T_WHITECOORD)->text();     // white coord
-
-    _videoMetadata[VIDEO_TITLE] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEOTITLE)->text();
-    _videoMetadata[VIDEO_AUTHOR] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEOAUTHOR)->text();
-    _videoMetadata[VIDEO_YEAR] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEOYEAR)->text();
-    _videoMetadata[VIDEO_PERFORMER] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEOPERF)->text();
-    _videoMetadata[VIDEO_DESCRIPTION] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEODESCR)->text();
-    _videoMetadata[VIDEO_MOVIENAME] = ui->tableWidget->item(_row, ColumnIndex::T_VIDEOMOVIENAME)->text();
-
-    for (int p = 0; p < AMOUNT_AUDIO_STREAMS; p++) {
-        _audioStreamCheckState[p] = (ui->tableWidget->item(_row, p + ColumnIndex::T_AUDIOCHECK_1)->text()).toInt();
-        _audioLang[p] = ui->tableWidget->item(_row, p + ColumnIndex::T_AUDIOLANG_1)->text();
-        _audioTitle[p] = ui->tableWidget->item(_row, p + ColumnIndex::T_AUDIOTITLE_1)->text();
-    }
-
-    for (int p = 0; p < AMOUNT_SUBTITLES; p++) {
-        _subtitleCheckState[p] = (ui->tableWidget->item(_row, p + ColumnIndex::T_SUBCHECK_1)->text()).toInt();
-        _subtitleLang[p] = ui->tableWidget->item(_row, p + ColumnIndex::T_SUBLANG_1)->text();
-        _subtitleTitle[p] = ui->tableWidget->item(_row, p + ColumnIndex::T_TITLESUB_1)->text();
-    }
-
-    //******************************** Set icons *****************************//
-
-    double halfTime = _dur/2;
-    QString tmb_file = setThumbnail(_curFilename, halfTime, PreviewRes::RES_HIGH, PreviewDest::PREVIEW);
-
+    //*************** Set icons ********************//
+    double halfTime = m_dur/2;
+    QString tmb_file = setThumbnail(m_curFilename, halfTime, PreviewRes::RES_HIGH, PreviewDest::PREVIEW);
     QSize imageSize = QSize(85, 48);
-    if (_rowSize == 25) {
-        QString icons[4][5] = {
+    if (m_rowHeight == ROWHEIGHT) {
+        const QString icons[4][5] = {
             {"cil-hdr",       "cil-camera-roll",       "cil-hd",       "cil-4k",       "cil-file"},
             {"cil-hdr",       "cil-camera-roll",       "cil-hd",       "cil-4k",       "cil-file"},
             {"cil-hdr",       "cil-camera-roll",       "cil-hd",       "cil-4k",       "cil-file"},
             {"cil-hdr_black", "cil-camera-roll_black", "cil-hd_black", "cil-4k_black", "cil-file_black"}
         };
+        int type = 4;
+        if (m_hdr[CUR_MASTER_DISPLAY] != "")
+            type = 0;
+        else
+        if (m_height.toInt() >=1 && m_height.toInt() < 720)
+            type = 1;
+        else
+        if (m_height.toInt() >= 720 && m_height.toInt() < 2160)
+            type = 2;
+        else
+        if (m_height.toInt() >= 2160)
+            type = 3;
 
-        if (_hdr[CUR_MASTER_DISPLAY] != "") {
-            tmb_file = ":/resources/icons/16x16/" + icons[_theme][0] + ".png";
-        }
-        else if (_height.toInt() >=1 && _height.toInt() < 720) {
-            tmb_file = ":/resources/icons/16x16/" + icons[_theme][1] + ".png";
-        }
-        else if (_height.toInt() >= 720 && _height.toInt() < 2160) {
-            tmb_file = ":/resources/icons/16x16/" + icons[_theme][2] + ".png";
-        }
-        else if (_height.toInt() >= 2160) {
-            tmb_file = ":/resources/icons/16x16/" + icons[_theme][3] + ".png";
-        }
-        else {
-            tmb_file = ":/resources/icons/16x16/" + icons[_theme][4] + ".png";
-        }
+        tmb_file = QString(":/resources/icons/16x16/%1.png").arg(icons[m_theme][type]);
         imageSize = QSize(16, 16);
     }
     QPixmap pxmp(tmb_file);
     QPixmap scaled = pxmp.scaled(imageSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    ui->tableWidget->item(_row, ColumnIndex::FILENAME)->setIcon(QIcon(scaled));
+    ui->tableWidget->item(m_row, ColumnIndex::FILENAME)->setIcon(QIcon(scaled));
 
-    //******************************** Set description *****************************//
-
-    ui->label_source->setText(_curFilename);
-
-    if (curCodec != "") {
+    //*********** Set description ******************//
+    ui->label_source->setText(m_curFilename);
+    if (curCodec != "")
         curCodec += ", ";
-    }
-    if (curRes != "") {
+
+    if (curRes != "")
         curRes += ", ";
-    }
-    if (curFps != "") {
+
+    if (curFps != "")
         curFps += " fps, ";
-    }
-    if (curAr != "") {
+
+    if (curAr != "")
         curAr += ", ";
-    }
-    if (curSpace != "") {
+
+    if (curSpace != "")
         curSpace += ", ";
-    }
-    if (curColorSampling != "") {
+
+    if (curColorSampling != "")
         curColorSampling += ", ";
-    }
-    if (curDepth != "") {
-        curDepth += tr(" bit, ");
-    }
-    if (curBitrate != "") {
-        curBitrate += tr(" kbps; ");
-    }
-    QString sourceParam = curCodec + curRes + curFps + curAr + curSpace + curColorSampling + curDepth + curBitrate;
 
-    int countAudioStreams = 0;
-    QString curAudioStream("");
-    while (countAudioStreams < AMOUNT_AUDIO_STREAMS) {
-        curAudioStream = ui->tableWidget->item(_row, countAudioStreams + ColumnIndex::T_AUDIO_1)->text();
-        if (curAudioStream == "") {
-            break;
-        }
-        countAudioStreams++;
-        sourceParam += tr("Audio #") + QString::number(countAudioStreams) + QString(": ") + curAudioStream + QString("; ");
-    }
+    if (curDepth != "")
+        curDepth += QString(" %1, ").arg(tr("bit"));
 
-    int countSubtitles = 0;
-    QString curSubtitle("");
-    while (countSubtitles < AMOUNT_SUBTITLES) {
-        curSubtitle = ui->tableWidget->item(_row, countSubtitles + ColumnIndex::T_SUBTITLE_1)->text();
-        if (curSubtitle == "") {
-            break;
-        }
-        countSubtitles++;
+    if (curBitrate != "")
+        curBitrate += QString(" %1").arg(tr("kbps"));
+
+    QString sourceParam = QString("%1: %2").arg(tr("Video"), curCodec + curRes +
+                                                curFps + curAr + curSpace +
+                                                curColorSampling + curDepth + curBitrate);
+
+    Q_LOOP(i, 0, _FIELDS(m_row, audioFormats).size()) {
+        const QString audioFormat = _FIELDS(m_row, audioFormats)[i];
+        const QString audioLang = _FIELDS(m_row, audioLangs)[i];
+        const QString audioCh = Helper::recalcChannels(_FIELDS(m_row, audioChannels)[i]) + " ch";
+        sourceParam += QString("\n%1 %2: %3, %4, %5").arg(tr("Audio"), numToStr(i + 1),
+                                                   audioFormat, audioCh, audioLang);
     }
 
+    Q_LOOP(i, 0, _FIELDS(m_row, subtFormats).size()) {
+        const QString subtFormat = _FIELDS(m_row, subtFormats)[i];
+        const QString subtLang = _FIELDS(m_row, subtLangs)[i];
+        sourceParam += QString("\n%1 %2: %3, %4").arg(tr("Subtitle"), numToStr(i + 1),
+                                                   subtFormat, subtLang);
+    }
 
-    if (curCodec == "Undef, ") {
+    if (curCodec == "Undef, ")
         sourceParam = tr("Undefined");
-    }
+
     ui->textBrowser_1->clear();
     ui->textBrowser_1->setText(sourceParam);
     get_output_filename();
 
-    //******************************** Set time widgets *****************************//
+    //*********** Set time widgets *****************//
+    ui->sliderTimeline->setMaximum(m_fr_count);
+    ui->lineEditStartTime->setText(Helper::timeConverter(m_startTime));
+    ui->lineEditEndTime->setText(Helper::timeConverter(m_endTime));
 
-    ui->horizontalSlider->setMaximum(_fr_count);
-    ui->lineEditStartTime->setText(timeConverter(_startTime));
-    ui->lineEditEndTime->setText(timeConverter(_endTime));
-
-    //******************************** Set video widgets *****************************//
-
-    QList<QLineEdit *> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit *>();
-    foreach (QLineEdit *lineEdit, linesEditMetadata) {
+    //********** Set video widgets *****************//
+    auto linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit *>();
+    foreach (QLineEdit *lineEdit, linesEditMetadata)
         lineEdit->setEnabled(true);
-    }
 
-    ui->lineEditTitleVideo->setText(_videoMetadata[VIDEO_TITLE]);
-    ui->lineEditAuthorVideo->setText(_videoMetadata[VIDEO_AUTHOR]);
-    ui->lineEditYearVideo->setText(_videoMetadata[VIDEO_YEAR]);
-    ui->lineEditPerfVideo->setText(_videoMetadata[VIDEO_PERFORMER]);
-    ui->lineEditDescriptionVideo->setText(_videoMetadata[VIDEO_DESCRIPTION]);
-    ui->lineEditMovieNameVideo->setText(_videoMetadata[VIDEO_MOVIENAME]);
+    ui->lineVTitle->setText(m_data[m_row].videoMetadata[VIDEO_TITLE]);
+    ui->lineVName->setText(m_data[m_row].videoMetadata[VIDEO_MOVIENAME]);
+    ui->lineVYear->setText(m_data[m_row].videoMetadata[VIDEO_YEAR]);
+    ui->lineVAuthor->setText(m_data[m_row].videoMetadata[VIDEO_AUTHOR]);
+    ui->lineVPerf->setText(m_data[m_row].videoMetadata[VIDEO_PERFORMER]);
+    ui->lineVDescript->setText(m_data[m_row].videoMetadata[VIDEO_DESCRIPTION]);
 
-    foreach (QLineEdit *lineEdit, linesEditMetadata) {
+    foreach (QLineEdit *lineEdit, linesEditMetadata)
         lineEdit->setCursorPosition(0);
+
+    //********** Set audio widgets *****************//
+    if (_FIELDS(m_row, audioFormats).size() > 0 ||
+            _FIELDS(m_row, externAudioFormats).size() > 0) {
+        m_pAudioLabel->setVisible(false);
+        ui->streamAudio->setList(m_data[m_row]);
     }
 
-    //******************************** Set audio widgets *****************************//
-    if (countAudioStreams > 0) {
-        audioThumb->setVisible(false);
-    }
-    for (int q = 0; q < AMOUNT_AUDIO_STREAMS; q++) {
-        QCheckBox *checkBoxAudio = ui->frameTab_2->findChild<QCheckBox *>("checkBoxAudio_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        checkBoxAudio->setChecked(bool(_audioStreamCheckState[q]));
-        QLineEdit *lineEditLangAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditLangAudio_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        lineEditLangAudio->setText(_audioLang[q]);
-        lineEditLangAudio->setCursorPosition(0);
-        QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        lineEditTitleAudio->setText(_audioTitle[q]);
-        lineEditTitleAudio->setCursorPosition(0);
-        QLabel *labelAudio = ui->frameTab_2->findChild<QLabel *>("labelTitleAudio_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        if (q < countAudioStreams) {
-            checkBoxAudio->setVisible(true);
-            lineEditLangAudio->setVisible(true);
-            lineEditTitleAudio->setVisible(true);
-            labelAudio->setVisible(true);
-        }
-    }
-
-    //******************************** Set subtitle widgets *****************************//
-    if (countSubtitles > 0) {
-        subtitleThumb->setVisible(false);
-    }
-    for (int q = 0; q < AMOUNT_SUBTITLES; q++) {
-        QCheckBox *checkBoxSubtitle = ui->frameTab_3->findChild<QCheckBox *>("checkBoxSubtitle_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        checkBoxSubtitle->setChecked(bool(_subtitleCheckState[q]));
-        QLineEdit *lineEditLangSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditLangSubtitle_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        lineEditLangSubtitle->setText(_subtitleLang[q]);
-        lineEditLangSubtitle->setCursorPosition(0);
-        QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        lineEditTitleSubtitle->setText(_subtitleTitle[q]);
-        lineEditTitleSubtitle->setCursorPosition(0);
-        QLabel *labelSubtitle = ui->frameTab_3->findChild<QLabel *>("labelTitleSub_"
-            + QString::number(q+1), Qt::FindDirectChildrenOnly);
-        if (q < countSubtitles) {
-            checkBoxSubtitle->setVisible(true);
-            lineEditLangSubtitle->setVisible(true);
-            lineEditTitleSubtitle->setVisible(true);
-            labelSubtitle->setVisible(true);
-        }
+    //********* Set subtitle widgets ***************//
+    if (_FIELDS(m_row, subtFormats).size() > 0 ||
+            _FIELDS(m_row, externSubtFormats).size() > 0) {
+        m_pSubtitleLabel->setVisible(false);
+        ui->streamSubtitle->setList(m_data[m_row]);
     }
 }
 
-void Widget::setTheme(int &ind_theme)   /*** Set theme ***/
+void MainWindow::setTheme(const int ind_theme)   // Set theme
 {
-    QFile file;
-    QString list("");
-    switch (ind_theme) {
-    case Theme::GRAY:
-        file.setFileName(":/resources/css/style_0.css");
-        break;
-    case Theme::DARK:
-        file.setFileName(":/resources/css/style_1.css");
-        break;
-    case Theme::WAVE:
-        file.setFileName(":/resources/css/style_2.css");
-        break;
-    case Theme::DEFAULT:
-        file.setFileName(":/resources/css/style_3.css");
-        break;
-    }
+    const QString themePath = QString(":/resources/css/style_%1.css")
+            .arg(numToStr(ind_theme));
+    QFile file(themePath);
     if (file.open(QFile::ReadOnly)) {
-        list = QString::fromUtf8(file.readAll());
+        const QString list = QString::fromUtf8(file.readAll());
+        setStyleSheet(Helper::getParsedCss(list));
         file.close();
     }
-    this->setStyleSheet(styleCreator(list));
-    int i = 11;
-    if (!_showHDR_mode)
-    {
-        while (i <= 19) {
-            ui->tableWidget->hideColumn(i);
-            i++;
-        }
-    } else {
-        while (i <= 19) {
-            ui->tableWidget->showColumn(i);
-            i++;
-        }
+    QString spinnerFile;
+    switch (ind_theme) {
+    case Theme::GRAY:
+    case Theme::DARK:
+    case Theme::WAVE:
+        spinnerFile = ":/resources/icons/svg/spinner_black.svg";
+        break;
+    case Theme::LIGHT:
+        spinnerFile = ":/resources/icons/svg/spinner.svg";
+        break;
+    }
+    m_pAnimation->setFileName(spinnerFile);
+
+    Q_LOOP(i, ColumnIndex::COLORRANGE, ColumnIndex::MASTERDISPLAY + 1) {
+        m_showHdrFlag ? ui->tableWidget->showColumn(i) :
+                        ui->tableWidget->hideColumn(i);
     }
     setExpandIcon();
 }
 
-QString Widget::styleCreator(const QString &list)    /*** Parsing CSS ***/
+void MainWindow::setStatus(const QString &status)
 {
-    QString style = list;
-    QStringList splitList;
-    QStringList varList;
-    QStringList varNames;
-    QStringList varValues;
-    splitList << list.split(';');
-
-    foreach (const QString &row, splitList) {
-        const int first_symbol = row.indexOf('@');
-        if (first_symbol != -1 && row.indexOf('=') != -1) {
-            varList.append(row.mid(first_symbol));
-        }
-    }
-    foreach (const QString &var, varList) {
-        varNames.append(var.split('=')[0].remove(' ').remove('\n'));
-        varValues.append(var.split('=')[1].remove(' ').remove('\n'));
-        style = style.remove(var + QString(";"));
-    }
-    for (int i = 0; i < varNames.size() && i < varValues.size(); i++) {
-        style = style.replace(varNames[i], varValues[i]);
-    }
-    //std::cout << style.toStdString() << std::endl;
-    return style;
+    QTableWidgetItem *__item = new QTableWidgetItem(status);
+    __item->setTextAlignment(Qt::AlignCenter);
+    ui->tableWidget->setItem(m_row, ColumnIndex::STATUS, __item);
 }
 
-void Widget::setStatus(QString status)
+void MainWindow::setWidgetsEnabled(bool state)    // Set widgets states
 {
-    QTableWidgetItem *newItem_status = new QTableWidgetItem(status);
-    newItem_status->setTextAlignment(Qt::AlignCenter);
-    ui->tableWidget->setItem(_row, ColumnIndex::STATUS, newItem_status);
+    ui->treeWidget->setEnabled(state);
+    state ? m_pAnimation->stop() : m_pAnimation->start();
+    m_pActAddFiles->setEnabled(state);
+    m_pActRemoveFile->setEnabled(state);
+    m_pActSettings->setEnabled(state);
+    m_pActAddToTask->setEnabled(state);
+    ui->lineEditCurTime->setEnabled(state);
+    ui->lineEditStartTime->setEnabled(state);
+    ui->lineEditEndTime->setEnabled(state);
+    ui->framePrev->setEnabled(state);
+    ui->frameNext->setEnabled(state);
+    ui->sliderTimeline->setEnabled(state);
+    ui->setStartTime->setEnabled(state);
+    ui->setEndTime->setEnabled(state);
+    ui->tableWidget->setEnabled(state);
+    ui->sortUp->setEnabled(state);
+    ui->sortDown->setEnabled(state);
+    ui->addFiles->setEnabled(state);
+    ui->removeFile->setEnabled(state);
+
+    ui->addPreset->setEnabled(state);
+    ui->removePreset->setEnabled(state);
+    ui->editPreset->setEnabled(state);
+    ui->applyPreset->setEnabled(state);
+
+    ui->comboBoxMode->setEnabled(state);
+    ui->addFilesHot->setEnabled(state);
+    ui->setOutFolder->setEnabled(state);
+    ui->sliderResize->setEnabled(state);
+
+    ui->clearMetadata->setEnabled(state);
+    ui->undoMetadata->setEnabled(state);
+    auto linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
+    foreach (QLineEdit *lineEdit, linesEditMetadata)
+        lineEdit->setEnabled(state);
+
+    ui->undoTitles->setEnabled(state);
+    ui->addExtStream->setEnabled(state);
+    ui->streamAudio->setEnabled(state);
+    //ui->streamAudioExtern->setEnabled(state);
+    ui->clearTitles->setEnabled(state);
+    ui->streamSubtitle->setEnabled(state);
+
+    ui->resetLabels->setEnabled(state);
+    ui->settings->setEnabled(state);
+
+    if (state) {
+        m_status_encode_btn = EncodingStatus::START;
+        ui->start->setProperty("status", m_status_encode_btn);
+        ui->start->style()->polish(ui->start);
+        ui->start->setToolTip(tr("Encode"));
+    }
 }
 
-void Widget::restore_initial_state()    /*** Restore initial state ***/
+void MainWindow::setProgressEnabled(bool state)
 {
-    ui->treeWidget->setEnabled(true);
-    animation->stop();
-    add_files->setEnabled(true);
-    remove_files->setEnabled(true);
-    settings->setEnabled(true);
-    ui->lineEditCurTime->setEnabled(true);
-    ui->lineEditStartTime->setEnabled(true);
-    ui->lineEditEndTime->setEnabled(true);
-    ui->buttonFramePrevious->setEnabled(true);
-    ui->buttonFrameNext->setEnabled(true);
-    ui->horizontalSlider->setEnabled(true);
-    ui->buttonSetStartTime->setEnabled(true);
-    ui->buttonSetEndTime->setEnabled(true);
-    ui->tableWidget->setEnabled(true);
-    ui->buttonSortUp->setEnabled(true);
-    ui->buttonSortDown->setEnabled(true);
-    ui->actionAdd->setEnabled(true);
-    ui->actionRemove->setEnabled(true);
-
-    ui->actionAdd_preset->setEnabled(true);
-    ui->actionRemove_preset->setEnabled(true);
-    ui->actionEdit_preset->setEnabled(true);
-    ui->buttonApplyPreset->setEnabled(true);
-    ui->comboBoxMode->setEnabled(true);
-    ui->buttonHotInputFile->setEnabled(true);
-    ui->buttonHotOutputFile->setEnabled(true);
-    ui->horizontalSlider_resize->setEnabled(true);
-
-    ui->actionClearMetadata->setEnabled(true);
-    ui->actionUndoMetadata->setEnabled(true);
-    QList<QLineEdit*> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
-    foreach (QLineEdit *lineEdit, linesEditMetadata) {
-        lineEdit->setEnabled(true);
-    }
-
-    ui->actionUndoTitles->setEnabled(true);
-    ui->actionClearAudioTitles->setEnabled(true);
-    for (int stream = 0; stream < AMOUNT_AUDIO_STREAMS; stream++) {
-        QCheckBox *checkBoxAudio = ui->frameTab_2->findChild<QCheckBox *>("checkBoxAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        checkBoxAudio->setEnabled(true);
-        QLineEdit *lineEditLangAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditLangAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditLangAudio->setEnabled(true);
-        QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditTitleAudio->setEnabled(true);
-    }
-
-    ui->actionClearSubtitleTitles->setEnabled(true);
-    for (int stream = 0; stream < AMOUNT_SUBTITLES; stream++) {
-        QCheckBox *checkBoxSubtitle = ui->frameTab_3->findChild<QCheckBox *>("checkBoxSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        checkBoxSubtitle->setEnabled(true);
-        QLineEdit *lineEditLangSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditLangSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditLangSubtitle->setEnabled(true);
-        QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditTitleSubtitle->setEnabled(true);
-    }
-    ui->actionResetLabels->setEnabled(true);
-    ui->actionSettings->setEnabled(true);
-    _status_encode_btn = EncodingStatus::START;
-    ui->actionEncode->setIcon(QIcon(":/resources/icons/16x16/cil-play.png"));
-    ui->actionEncode->setToolTip(tr("Encode"));
+    ui->labelAnimation->setVisible(state);
+    ui->label_Progress->setVisible(state);
+    ui->label_Remaining->setVisible(state);
+    ui->label_RemTime->setVisible(state);
+    ui->progressBar->setVisible(state);
 }
 
-bool Widget::eventFilter(QObject *watched, QEvent *event)    /*** Resize and move window ***/
+void MainWindow::changeEvent(QEvent *event)
+{
+    BaseWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) {
+        m_expandWindowsState = isMaximized() ? true: false;
+        setExpandIcon();
+    }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
         if (keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Return) {
-            ui->frame_middle->setFocus();
+            ui->frameMiddle->setFocus();
             return true;
         }
     } else
-
-    if (event->type() == QEvent::MouseButtonRelease) {
-        QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-        if (mouse_event->button() == Qt::LeftButton) {
-            QGuiApplication::restoreOverrideCursor();
-            _clickPressedFlag = false;
-            _clickPressedToResizeFlag.fill(false);
-            return true;
-        }
-    } else
-
-    if (watched == this) {     // ******** Resize window realisation ******* //
-        if (!this->isMaximized()) {
-            if (event->type() == QEvent::HoverLeave) {
-                QGuiApplication::restoreOverrideCursor();
-                return true;
-            } else
-
-            if (event->type() == QEvent::HoverMove && _clickPressedToResizeFlag.indexOf(true) == -1) {
-                const QPoint &&mouseCoordinate = this->mapFromGlobal(QCursor::pos());
-                if (mouseCoordinate.x() < 6) {
-                    if (mouseCoordinate.y() < 6) {
-                        setCursor(QCursor(Qt::SizeFDiagCursor));
-                        return true;
-                    } else
-                    if (mouseCoordinate.y() > 6 && mouseCoordinate.y() < (height() - 6)) {
-                        setCursor(QCursor(Qt::SizeHorCursor));
-                        return true;
-                    } else
-                    if (mouseCoordinate.y() > (height() - 6)) {
-                        setCursor(QCursor(Qt::SizeBDiagCursor));
-                        return true;
-                    }
-                } else
-                if (mouseCoordinate.x() > 6 && mouseCoordinate.x() < (width() - 6)) {
-                    if (mouseCoordinate.y() < 6 || mouseCoordinate.y() > (height() - 6)) {
-                        setCursor(QCursor(Qt::SizeVerCursor));
-                        return true;
-                    }
-                } else
-                if (mouseCoordinate.x() > (width() - 6)) {
-                    if (mouseCoordinate.y() < 6) {
-                        setCursor(QCursor(Qt::SizeBDiagCursor));
-                        return true;
-                    } else
-                    if (mouseCoordinate.y() > 6 && mouseCoordinate.y() < (height() - 6)) {
-                        setCursor(QCursor(Qt::SizeHorCursor));
-                        return true;
-                    } else
-                    if (mouseCoordinate.y() > (height() - 6)) {
-                        setCursor(QCursor(Qt::SizeFDiagCursor));
-                        return true;
-                    }
-                }
-                QGuiApplication::restoreOverrideCursor();
-            } else
-            if (event->type() == QEvent::MouseButtonPress) {
-                QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-                if (mouse_event->button() == Qt::LeftButton) {
-                    _oldPosX = this->pos().x();
-                    _oldPosY = this->pos().y();
-                    _oldWidth = this->width();
-                    _oldHeight = this->height();
-                    _globalMouseClickCoordinate = mouse_event->globalPos();
-                    const QPoint mouseClickCoordinate = mouse_event->pos();
-                    if (mouseClickCoordinate.x() < 6) {
-                        if (mouseClickCoordinate.y() < 6) {
-                            _clickPressedToResizeFlag[Resize::LEFT_TOP] = true;
-                            return true;
-                        } else
-                        if (mouseClickCoordinate.y() > 6 && mouseClickCoordinate.y() < (_oldHeight - 6)) {
-                            _clickPressedToResizeFlag[Resize::LEFT] = true;
-                            return true;
-                        } else
-                        if (mouseClickCoordinate.y() > (_oldHeight - 6)) {
-                            _clickPressedToResizeFlag[Resize::LEFT_BOTTOM] = true;
-                            return true;
-                        }
-                    } else
-                    if (mouseClickCoordinate.x() > 6 && mouseClickCoordinate.x() < (_oldWidth - 6)) {
-                        if (mouseClickCoordinate.y() < 6) {
-                            _clickPressedToResizeFlag[Resize::TOP] = true;
-                            return true;
-                        } else
-                        if (mouseClickCoordinate.y() > (_oldHeight - 6)) {
-                            _clickPressedToResizeFlag[Resize::BOTTOM] = true;
-                            return true;
-                        }
-                    } else
-                    if (mouseClickCoordinate.x() > (_oldWidth - 6)) {
-                        if (mouseClickCoordinate.y() < 6) {
-                            _clickPressedToResizeFlag[Resize::RIGHT_TOP] = true;
-                            return true;
-                        } else
-                        if (mouseClickCoordinate.y() > 6 && mouseClickCoordinate.y() < (_oldHeight - 6)) {
-                            _clickPressedToResizeFlag[Resize::RIGHT] = true;
-                            return true;
-                        } else
-                        if (mouseClickCoordinate.y() > (_oldHeight - 6)) {
-                            _clickPressedToResizeFlag[Resize::RIGHT_BOTTOM] = true;
-                            return true;
-                        }
-                    }
-                }
-            } else
-            if (event->type() == QEvent::MouseMove) {
-                QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-                if (mouse_event->buttons() & Qt::LeftButton) {
-                    const int index = _clickPressedToResizeFlag.indexOf(true);
-                    if (index != -1) {
-                        const int deltaX = mouse_event->globalPos().x();
-                        const int deltaY = mouse_event->globalPos().y();
-                        const int deltaWidth = deltaX - _globalMouseClickCoordinate.x();
-                        const int deltaHeight = deltaY - _globalMouseClickCoordinate.y();
-                        switch (index) {
-                        case Resize::LEFT:
-                            setGeometry(deltaX, _oldPosY, _oldWidth - deltaWidth, _oldHeight);
-                            break;
-                        case Resize::LEFT_TOP:
-                            setGeometry(deltaX, deltaY, _oldWidth - deltaWidth, _oldHeight - deltaHeight);
-                            break;
-                        case Resize::LEFT_BOTTOM:
-                            setGeometry(deltaX, _oldPosY, _oldWidth - deltaWidth, _oldHeight + deltaHeight);
-                            break;
-                        case Resize::TOP:
-                            setGeometry(_oldPosX, deltaY, _oldWidth, _oldHeight - deltaHeight);
-                            break;
-                        case Resize::RIGHT:
-                            setGeometry(_oldPosX, _oldPosY, _oldWidth + deltaWidth, _oldHeight);
-                            break;
-                        case Resize::RIGHT_TOP:
-                            setGeometry(_oldPosX, deltaY, _oldWidth + deltaWidth, _oldHeight - deltaHeight);
-                            break;
-                        case Resize::RIGHT_BOTTOM:
-                            setGeometry(_oldPosX, _oldPosY, _oldWidth + deltaWidth, _oldHeight + deltaHeight);
-                            break;
-                        case Resize::BOTTOM:
-                            setGeometry(_oldPosX, _oldPosY, _oldWidth, _oldHeight + deltaHeight);
-                            break;
-                        }
-                        return true;
-                    }
-                }
-            }
-        }
-    } else
-
-    if (watched == ui->frame_main) {    // ***** Restore cursor realisation ******** //
-        if (event->type() == QEvent::HoverMove) {
-            setCursor(QCursor(Qt::ArrowCursor));
-            return true;
-        }
-    } else
-
-    if (watched == ui->frame_top) {     // ********* Drag and expand window realisation ********* //
+    if (watched == m_pTableLabel) {
         if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
             if (mouse_event->button() == Qt::LeftButton) {
-                _mouseClickCoordinate = mouse_event->pos() + QPoint(7,7);
-                _clickPressedFlag = true;
-                return true;
-            }
-        } else
-        if ((event->type() == QEvent::MouseMove) && _clickPressedFlag) {
-            QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-            if (mouse_event->buttons() & Qt::LeftButton) {
-                if (this->isMaximized()) on_expandWindow_clicked();
-                this->move(mouse_event->globalPos() - _mouseClickCoordinate);
-                return true;
-            }
-        } else
-        if (event->type() == QEvent::MouseButtonDblClick) {
-            QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-            if (mouse_event->buttons() & Qt::LeftButton) {
-                on_expandWindow_clicked();
+                onAddFiles();
                 return true;
             }
         }
     } else
-
-    if (watched == raiseThumb) {    // ********* Click thumb realisation ********** //
-        if (event->type() == QEvent::MouseButtonPress) {
-            QMouseEvent* mouse_event = dynamic_cast<QMouseEvent*>(event);
-            if (mouse_event->button() == Qt::LeftButton) {
-                on_actionAdd_clicked();
-                return true;
-            }
-        }
-    } else
-
-    if (watched == ui->labelThumb) {
+    if (watched == ui->labelPreview) {
         if (event->type() == QEvent::Resize) {
-            if (!preview_pixmap.isNull()) {
+            if (!m_preview_pixmap.isNull()) {
                 QPixmap pix_scaled;
-                pix_scaled = preview_pixmap.scaled(ui->frame_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-                ui->labelThumb->setPixmap(pix_scaled);
+                pix_scaled = m_preview_pixmap.scaled(ui->framePreview->size(),
+                                                   Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                ui->labelPreview->setPixmap(pix_scaled);
             }
         }
     }
-    return QWidget::eventFilter(watched, event);
+    return BaseWindow::eventFilter(watched, event);
 }
 
-bool Widget::event(QEvent *event)
-{
+/************************************************
+** Browser
+************************************************/
 
-    return QWidget::event(event);
+void MainWindow::onViewMode(uchar ind)
+{
+    if (ind == 1) {
+        ui->listFiles->setViewMode(QListView::IconMode);
+        ui->listFiles->setWordWrap(true);
+#ifdef Q_OS_UNIX
+        ui->listFiles->setSpacing(10);
+        ui->listFiles->setGridSize(QSize(120, 120));
+#else
+        ui->listFiles->setSpacing(0);
+        ui->listFiles->setGridSize(QSize(100, 100));
+#endif
+        ui->listFiles->setIconSize(QSize(80, 80));
+    } else {
+        ui->listFiles->setViewMode(QListView::ListMode);
+        ui->listFiles->setWordWrap(false);
+#ifdef Q_OS_UNIX
+        ui->listFiles->setSpacing(5);
+        ui->listFiles->setGridSize(QSize(200, 50));
+#else
+        ui->listFiles->setSpacing(0);
+        ui->listFiles->setGridSize(QSize(200, 45));
+#endif
+        ui->listFiles->setIconSize(QSize(30, 40));
+    }
+}
+
+void MainWindow::setBrowser()
+{
+    m_pDirModel = new QFileSystemModel(this);
+    m_pDirModel->setReadOnly(true);
+    m_pDirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs);
+    //connect(m_pDirModel, &QFileSystemModel::directoryLoaded, this, [this, ind, root](const QString &path) {
+        //ui->treeDirs->expandAll();
+        /*if (path == root) {
+            const QModelIndex child = m_pDirModel->index(0, 0, ind);
+            if (child.isValid()) {
+                ui->treeDirs->setCurrentIndex(child);
+                onTreeDirsClicked(child);
+            }
+        }*/
+    //});
+    ui->treeDirs->setModel(m_pDirModel);
+    ui->treeDirs->setColumnWidth(0, 150);
+    ui->treeDirs->hideColumn(1);
+    ui->treeDirs->hideColumn(2);
+    ui->treeDirs->hideColumn(3);
+    ui->treeDirs->header()->hide();
+
+    m_pFileModel = new QFileSystemModel(this);
+    m_pFileModel->setReadOnly(true);
+    m_pFileModel->setFilter(QDir::NoDotAndDotDot | QDir::Files);
+    QStringList filters = {
+        "*.avi", "*.m2ts", "*.m4v", "*.mkv", "*.mov", "*.mp4",
+        "*.mpeg", "*.mpg", "*.mxf", "*.wmv", "*.ts", "*.webm"
+    };
+    m_pFileModel->setNameFilterDisables(false);
+    m_pFileModel->setNameFilters(filters);
+
+    ui->listFiles->setModel(m_pFileModel);
+    ui->listFiles->setResizeMode(QListView::ResizeMode::Adjust);
+    ui->listFiles->setFlow(QListView::Flow::LeftToRight);
+    ui->listFiles->setTextElideMode(Qt::ElideMiddle);
+    ui->listFiles->setMovement(QListView::Movement::Snap);
+    ui->listFiles->setUniformItemSizes(true);
+    ui->listFiles->setWrapping(true);
+    ui->listFiles->setSelectionRectVisible(true);
+    ui->listFiles->setSelectionMode(QAbstractItemView::SelectionMode::ContiguousSelection);
+}
+
+void MainWindow::onBack()
+{
+    auto getPreviousPath = [](const QString &path)->QString {
+        const QString previousPath = QFileInfo(path).dir().absolutePath();
+        if (QFileInfo::exists(previousPath)) {
+            return previousPath;
+        }
+        return path;
+    };
+    const QString root = m_pDirModel->rootPath();
+    const QString previousPath = getPreviousPath(root);
+    if (previousPath != root) {
+        ui->treeDirs->setRootIndex(m_pDirModel->setRootPath(previousPath));
+        ui->listFiles->setRootIndex(m_pFileModel->setRootPath(previousPath));
+    }
+}
+
+void MainWindow::onForward()
+{
+    ui->treeDirs->setRootIndex(m_pDirModel->setRootPath(m_openDir));
+    ui->listFiles->setRootIndex(m_pFileModel->setRootPath(m_openDir));
+}
+
+void MainWindow::onTreeDirsClicked(const QModelIndex &index)
+{
+    const QString path = m_pDirModel->fileInfo(index).absoluteFilePath();
+    ui->listFiles->setRootIndex(m_pFileModel->setRootPath(path));
+}
+
+void MainWindow::onTreeDirsDblClicked(const QModelIndex &index)
+{
+    const QString path = m_pDirModel->fileInfo(index).absoluteFilePath();
+    ui->treeDirs->setRootIndex(m_pDirModel->setRootPath(path));
+    ui->listFiles->setRootIndex(m_pFileModel->setRootPath(path));
+}
+
+void MainWindow::provideListContextMenu(const QPoint &pos)     // Call file items menu
+{
+    auto selectedList = ui->listFiles->selectionModel()->selectedIndexes();
+    if (selectedList.size() > 0)
+        m_pFilesItemMenu->exec(ui->listFiles->mapToGlobal(pos + QPoint(5, 5)));
+}
+
+void MainWindow::onAddToTask()
+{
+    QStringList list;
+    foreach(auto index, ui->listFiles->selectionModel()->selectedIndexes())
+        list.append(m_pFileModel->fileInfo(index).absoluteFilePath());
+    if (list.size() > 0)
+        openFiles(list);
 }
 
 /************************************************
 ** Encoder
 ************************************************/
 
-void Widget::initEncoding()
+void MainWindow::initEncoding()
 {
     ui->textBrowser_log->clear();
     const QString globalTitle = ui->lineEditGlobalTitle->text();
-    encoder->initEncoding(_temp_file,
-                          _input_file,
-                          _output_file,
-                          _width,
-                          _height,
-                          _fps,
-                          _startTime,
-                          _endTime,
-                          _dur,
-                          extension,
-                          globalTitle,
-                          _cur_param,
-                          _hdr,
-                          _videoMetadata,
-                          _audioLang,
-                          _audioTitle,
-                          _subtitleLang,
-                          _subtitleTitle,
-                          _audioStreamCheckState,
-                          _subtitleCheckState,
-                          &_fr_count,
-                          _black_borders,
-                          _decode_with_qsv);
+    const int streamCutting = ui->switchCutting->currentIndex();
+    m_pEncoder->initEncoding(m_temp_file,
+                             m_input_file,
+                             m_output_file,
+                             m_width,
+                             m_height,
+                             m_fps,
+                             m_startTime,
+                             m_endTime,
+                             m_dur,
+                             extension,
+                             globalTitle,
+                             m_curParams,
+                             m_hdr,
+                             m_data[m_row],
+                             &m_fr_count,
+                             streamCutting,
+                            _black_borders,
+                            _decode_with_qsv);
 }
 
-void Widget::onEncodingMode(const QString &mode)
+void MainWindow::onEncodingMode(const QString &mode)
 {
     ui->label_Progress->setText(mode);
 }
 
-void Widget::onEncodingStarted()
+void MainWindow::onEncodingStarted()
 {
     setStatus(tr("Encoding"));
-    ui->treeWidget->setEnabled(false);
-    add_files->setEnabled(false);
-    remove_files->setEnabled(false);
-    settings->setEnabled(false);
-    ui->lineEditCurTime->setEnabled(false);
-    ui->lineEditStartTime->setEnabled(false);
-    ui->lineEditEndTime->setEnabled(false);
-    ui->buttonFramePrevious->setEnabled(false);
-    ui->buttonFrameNext->setEnabled(false);
-    ui->horizontalSlider->setEnabled(false);
-    ui->buttonSetStartTime->setEnabled(false);
-    ui->buttonSetEndTime->setEnabled(false);
-    ui->tableWidget->setEnabled(false);
-    ui->buttonSortUp->setEnabled(false);
-    ui->buttonSortDown->setEnabled(false);
-    ui->actionAdd->setEnabled(false);
-    ui->actionRemove->setEnabled(false);
-
-    ui->actionAdd_preset->setEnabled(false);
-    ui->actionRemove_preset->setEnabled(false);
-    ui->actionEdit_preset->setEnabled(false);
-    ui->buttonApplyPreset->setEnabled(false);
-    ui->comboBoxMode->setEnabled(false);
-    ui->buttonHotInputFile->setEnabled(false);
-    ui->buttonHotOutputFile->setEnabled(false);
-    ui->horizontalSlider_resize->setEnabled(false);
-
-    ui->actionClearMetadata->setEnabled(false);
-    ui->actionUndoMetadata->setEnabled(false);
-    QList<QLineEdit*> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
-    foreach (QLineEdit *lineEdit, linesEditMetadata) {
-        lineEdit->setEnabled(false);
-    }
-
-    ui->actionUndoTitles->setEnabled(false);
-    ui->actionClearAudioTitles->setEnabled(false);
-    for (int stream = 0; stream < AMOUNT_AUDIO_STREAMS; stream++) {
-        QCheckBox *checkBoxAudio = ui->frameTab_2->findChild<QCheckBox *>("checkBoxAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        checkBoxAudio->setEnabled(false);
-        QLineEdit *lineEditLangAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditLangAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditLangAudio->setEnabled(false);
-        QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditTitleAudio->setEnabled(false);
-    }
-
-    ui->actionClearSubtitleTitles->setEnabled(false);
-    for (int stream = 0; stream < AMOUNT_SUBTITLES; stream++) {
-        QCheckBox *checkBoxSubtitle = ui->frameTab_3->findChild<QCheckBox *>("checkBoxSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        checkBoxSubtitle->setEnabled(false);
-        QLineEdit *lineEditLangSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditLangSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditLangSubtitle->setEnabled(false);
-        QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-            + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-        lineEditTitleSubtitle->setEnabled(false);
-    }
-
-    ui->actionResetLabels->setEnabled(false);
-    ui->actionSettings->setEnabled(false);
-    ui->labelAnimation->show();
-    //animation->start();
-    ui->label_Progress->show();
-    ui->label_Remaining->show();
-    ui->label_RemTime->show();
-    ui->progressBar->show();
+    setWidgetsEnabled(false);
+    setProgressEnabled(true);
 }
 
-void Widget::onEncodingInitError(const QString &message)
+void MainWindow::onEncodingInitError(const QString &message)
 {
-    restore_initial_state();
-    call_task_complete(message, false);
-    /*_status_encode_btn = "start";
-    ui->actionEncode->setIcon(QIcon(":/resources/icons/16x16/cil-play.png"));
-    ui->actionEncode->setToolTip(tr("Encode"));
-    call_task_complete(_message, false);*/
+    setWidgetsEnabled(true);
+    showInfoMessage(message);
 }
 
-void Widget::onEncodingProgress(const int &percent, const float &rem_time)
+void MainWindow::onEncodingProgress(const int percent, const float rem_time)
 {
     ui->progressBar->setValue(percent);
-    ui->label_RemTime->setText(timeConverter(rem_time));
+    ui->label_RemTime->setText(Helper::timeConverter(rem_time));
 }
 
-void Widget::onEncodingLog(const QString &log)
+void MainWindow::onEncodingLog(const QString &log)
 {
     ui->textBrowser_log->append(log);
 }
 
-void Widget::onEncodingCompleted()
+void MainWindow::onEncodingCompleted()
 {
-    std::cout << "Completed ..." << std::endl;  //  Debug info //
+    auto onTaskCompleted = [this]() {
+        setWidgetsEnabled(true);
+        const time_t end_t = time(nullptr);
+        const float elps_t = (end_t >= m_strt_t) ? static_cast<float>(end_t - m_strt_t) : 0.0f;
+        if (m_protectFlag)
+            m_pTimer->stop();
+        showPopup(tr("Task completed!\n\n Elapsed time: ") +
+                        Helper::timeConverter(elps_t));
+    };
+    Print("Completed ...");
     setStatus(tr("Done!"));
-    animation->stop();
-    ui->label_Progress->hide();
-    ui->label_Remaining->hide();
-    ui->label_RemTime->hide();
-    ui->labelAnimation->hide();
-    ui->progressBar->hide();
-    if (_batch_mode == true) {
-        int row = ui->tableWidget->currentRow();
-        int numRows = ui->tableWidget->rowCount();
+    m_pAnimation->stop();
+    setProgressEnabled(false);
+    if (m_batch_mode) {
+        const int row = ui->tableWidget->currentRow();
+        const int numRows = ui->tableWidget->rowCount();
         if (numRows > (row + 1)) {
             ui->tableWidget->selectRow(row + 1);
             initEncoding();
         } else {
-            restore_initial_state();
-            time_t end_t = time(nullptr);
-            float elps_t = static_cast<float>(end_t - _strt_t);
-            if (elps_t < 0.0f) {
-                elps_t = 0.0f;
-            }
-            if (_protection == true) {
-                timer->stop();
-            }
-            _message = tr("Task completed!\n\n Elapsed time: ") + timeConverter(elps_t);
-            call_task_complete(_message, false);
+            onTaskCompleted();
         }
     } else {
-        restore_initial_state();
-        time_t end_t = time(nullptr);
-        float elps_t = static_cast<float>(end_t - _strt_t);
-        if (elps_t < 0.0f) {
-            elps_t = 0.0f;
-        }
-        if (_protection == true) {
-            timer->stop();
-        }
-        _message = tr("Task completed!\n\n Elapsed time: ") + timeConverter(elps_t);
-        call_task_complete(_message, false);
+        onTaskCompleted();
     }
-    QDir().remove(QDir::homePath() + QString("/ffmpeg2pass-0.log"));
-    QDir().remove(QDir::homePath() + QString("/ffmpeg2pass-0.log.mbtree"));
-    QDir().remove(QDir::homePath() + QString("/x265_2pass.log"));
-    QDir().remove(QDir::homePath() + QString("/x265_2pass.log.cutree"));
+    QList<QString> tempFiles = {
+        "/ffmpeg2pass-0.log", "/ffmpeg2pass-0.log.mbtree",
+        "/x265_2pass.log.temp", "/x265_2pass.log.cutree.temp",
+        "/x265_2pass.log", "/x265_2pass.log.cutree"
+    };
+    foreach (auto &file, tempFiles)
+        QDir().remove(QDir::homePath() + file);
 }
 
-void Widget::onEncodingAborted()
+void MainWindow::onEncodingAborted()
 {
-    std::cout << "Stop execute ..." << std::endl;  //  Debug info //
-    if (_protection) timer->stop();
+    Print("Stop execute ...");
+    if (m_protectFlag)
+        m_pTimer->stop();
     setStatus(tr("Stop"));
-    ui->label_Progress->hide();
-    ui->label_Remaining->hide();
-    ui->label_RemTime->hide();
-    ui->labelAnimation->hide();
-    ui->progressBar->hide();
-    _message = tr("The current encoding process has been canceled!\n");
-    restore_initial_state();
-    call_task_complete(_message, false);
+    setWidgetsEnabled(true);
+    setProgressEnabled(false);
+    showPopup(tr("The current encoding process has been canceled!\n"));
 }
 
-void Widget::onEncodingError(const QString &error_message)
+void MainWindow::onEncodingError(const QString &error_message, bool popup)
 {
-    std::cout << "Error_1 ..." << std::endl;  //  Debug info //
-    if (_protection) timer->stop();
-    setStatus(tr("Error!"));
-    restore_initial_state();
-    if (error_message != "") {
-        _message = tr("An error occurred: ") + error_message;
+    if (!popup) {
+        Print("Error...");
+        if (m_protectFlag)
+            m_pTimer->stop();
+        setStatus(tr("Error!"));
+        setWidgetsEnabled(true);
+        const QString msg = (error_message != "") ? tr("An error occurred: ") + error_message :
+                                                    tr("Unexpected error occurred!");
+        showInfoMessage(msg);
     } else {
-        _message = tr("Unexpected error occurred!");
+        showPopup(error_message);
     }
-    call_task_complete(_message, false);
 }
 
-void Widget::pause()    // Pause encoding
+void MainWindow::pause()    // Pause encoding
 {
-    if (_protection) timer->stop();
-    if (encoder->getEncodingState() != QProcess::NotRunning) {
+    if (m_protectFlag)
+        m_pTimer->stop();
+    if (m_pEncoder->getEncodingState() != QProcess::NotRunning) {
         setStatus(tr("Pause"));
-        animation->stop();
-        encoder->pauseEncoding();
+        m_pAnimation->stop();
+        m_pEncoder->pauseEncoding();
     }
 }
 
-void Widget::resume()   // Resume encoding
+void MainWindow::resume()   // Resume encoding
 {
-    if (_protection) timer->start();
-    if (encoder->getEncodingState() != QProcess::NotRunning) {
+    if (m_protectFlag)
+        m_pTimer->start();
+    if (m_pEncoder->getEncodingState() != QProcess::NotRunning) {
         setStatus(tr("Encoding"));
-        //animation->start();
-        encoder->resumeEncoding();
+        m_pAnimation->start();
+        m_pEncoder->resumeEncoding();
     }
 }
 
-void Widget::repeatHandler_Type_1()  /*** Repeat handler ***/
+void MainWindow::repeatHandler_Type_1()  // Repeat handler
 {
-    std::cout<< "Call by timer..." << std::endl;
-    on_actionEncode_clicked();
-    call_task_complete(tr("Pause"), true);
-    on_actionEncode_clicked();
+    //Print("Repeat handler...");
+    onStart();
+    showInfoMessage(tr("Pause"), true);
+    onStart();
 }
 
 /************************************************
 ** Task Window
 ************************************************/
 
-void Widget::on_actionAdd_clicked() /*** Add files ***/
+void MainWindow::onAddFiles() // Add files
 {
-    QFileDialog openFilesWindow(nullptr);
-    openFilesWindow.setWindowTitle("Open Files");
-    openFilesWindow.setMinimumWidth(600);
-    openFilesWindow.setWindowFlags(Qt::Dialog | Qt::SubWindow);
-    openFilesWindow.setOption(QFileDialog::DontResolveSymlinks, true);
-    if (_desktopEnv == "gnome") openFilesWindow.setOption(QFileDialog::DontUseNativeDialog, true);
-    openFilesWindow.setFileMode(QFileDialog::ExistingFiles);
-    openFilesWindow.setAcceptMode(QFileDialog::AcceptOpen);
-    openFilesWindow.setDirectory(_openDir);
-    openFilesWindow.setNameFilter(tr("Video Files: *.avi, *.m2ts, *.m4v, *.mkv, *.mov, *.mp4, "
-                                     "*.mpeg, *.mpg, *.mxf, *.ts, *.webm (*.avi *.m2ts *.m4v "
-                                     "*.mkv *.mov *.mp4 *.mpeg *.mpg *.mxf *.ts *.webm);;All files (*.*)"));
-    if (openFilesWindow.exec() == QFileDialog::Accepted) {
-        const QStringList openFileNames = openFilesWindow.selectedFiles();
-        openFiles(openFileNames);
+    QStringList result;
+    Helper::openFileDialog(Helper::FileDialogType::OPENVFILES,
+                           tr("Open Files"),
+                           m_openDir,
+                           result);
+    if (!result.isEmpty())
+        openFiles(result);
+}
+
+void MainWindow::onRemoveFile()  // Remove file from table
+{
+    const int row = ui->tableWidget->currentRow();
+    if (row != -1) {
+        ui->tableWidget->blockSignals(true);
+        ui->tableWidget->removeRow(row);
+        Helper::eraseRow(m_data, row);
+        ui->tableWidget->blockSignals(false);
+        onTableSelectionChanged();
     }
 }
 
-void Widget::on_actionRemove_clicked()  /*** Remove file from table ***/
+void MainWindow::onSort(const bool up)
 {
-    _row = ui->tableWidget->currentRow();
-    if (_row != -1) {
-        ui->tableWidget->removeRow(_row);
+    const int rowsCount = ui->tableWidget->rowCount();
+    Q_LOOP(i, 0, rowsCount) {
+        QTableWidgetItem *__id = new QTableWidgetItem(numToStr(i));
+        ui->tableWidget->setItem(i, ColumnIndex::T_ID, __id);
     }
+    Qt::SortOrder srt = (up) ? Qt::AscendingOrder : Qt::DescendingOrder;
+    ui->tableWidget->sortByColumn(ColumnIndex::FILENAME, srt);
+    QVector<int> order(0);
+    Q_LOOP(i, 0, rowsCount)
+        order.push_back(GETTEXT(i, T_ID).toInt());
+    Helper::reorder(m_data, order);
 }
 
-void Widget::on_buttonCloseTaskWindow_clicked()
+void MainWindow::onSortDown()    // Sort table
 {
-    on_closeWindow_clicked();
+    onSort(false);
 }
 
-void Widget::on_buttonSortDown_clicked()    /*** Sort table ***/
+void MainWindow::onSortUp()    // Sort table
 {
-    ui->tableWidget->sortByColumn(ColumnIndex::FILENAME, Qt::DescendingOrder);
+    onSort(true);
 }
 
-void Widget::on_buttonSortUp_clicked()    /*** Sort table ***/
+void MainWindow::onStart()  // Encode button
 {
-    ui->tableWidget->sortByColumn(ColumnIndex::FILENAME, Qt::AscendingOrder);
-}
-
-void Widget::on_actionEncode_clicked()  /*** Encode button ***/
-{
-    switch (_status_encode_btn) {
+    switch (m_status_encode_btn) {
     case EncodingStatus::START: {
-        std::cout << "Status encode btn: start" << std::endl;  // Debug info //
-        int cnt = ui->tableWidget->rowCount();
-        if (cnt == 0) {
-            _message = tr("Select input file first!");
-            call_task_complete(_message, false);
+        Print("Status encode btn: start");
+        if (ui->tableWidget->rowCount() == 0) {
+            showPopup(tr("Select input file first!"), PopupMessage::Icon::Warning);
             return;
         }
-        if (_pos_cld == -1) {
-            _message = tr("Select preset first!");
-            call_task_complete(_message, false);
+        if (m_pos_cld == -1) {
+            showPopup(tr("Select preset first!"), PopupMessage::Icon::Warning);
             return;
         }
-        _status_encode_btn = EncodingStatus::PAUSE;
-        ui->actionEncode->setIcon(QIcon(":/resources/icons/16x16/cil-pause.png"));
-        ui->actionEncode->setToolTip(tr("Pause"));
-        _strt_t = time(nullptr);
-        if (_protection == true) {
-            timer->start();
-        }
+        m_status_encode_btn = EncodingStatus::PAUSE;
+        m_strt_t = time(nullptr);
+        if (m_protectFlag)
+            m_pTimer->start();
         initEncoding();
         break;
     }
     case EncodingStatus::PAUSE: {
-        std::cout << "Status encode btn: pause" << std::endl;  // Debug info //
+        Print("Status encode btn: pause");
         pause();
-        _status_encode_btn = EncodingStatus::RESUME;
-        ui->actionEncode->setIcon(QIcon(":/resources/icons/16x16/cil-forward.png"));
-        ui->actionEncode->setToolTip(tr("Resume"));
+        m_status_encode_btn = EncodingStatus::RESUME;
         break;
     }
     case EncodingStatus::RESUME: {
-        std::cout << "Status encode btn: resume" << std::endl;  // Debug info //
+        Print("Status encode btn: resume");
         resume();
-        _status_encode_btn = EncodingStatus::PAUSE;
-        ui->actionEncode->setIcon(QIcon(":/resources/icons/16x16/cil-pause.png"));
-        ui->actionEncode->setToolTip(tr("Pause"));
+        m_status_encode_btn = EncodingStatus::PAUSE;
         break;
     }
     default:
-        break;
+        return;
+    }
+    QString status[] = {tr("Pause"), tr("Resume"), tr("Pause")};
+    ui->start->setToolTip(status[m_status_encode_btn]);
+    ui->start->setProperty("status", m_status_encode_btn);
+    ui->start->style()->polish(ui->start);
+}
+
+void MainWindow::onStop()    // Stop
+{
+    Print("Call Stop ...");
+    if (m_pEncoder->getEncodingState() != QProcess::NotRunning) {
+        bool confirm = showDialogMessage(tr("Stop encoding?"));
+        if (confirm)
+            m_pEncoder->stopEncoding();
     }
 }
 
-void Widget::on_actionStop_clicked()    /*** Stop ***/
+void MainWindow::openFiles(const QStringList &openFileNames)    // Open files
 {
-    std::cout << "Call Stop ..." << std::endl;  //  Debug info //
-    if (encoder->getEncodingState() != QProcess::NotRunning) {
-        _message = tr("Stop encoding?");
-        bool confirm = call_dialog(_message);
-        if (confirm) {
-            encoder->stopEncoding();
-        }
-    }
-}
-
-void Widget::openFiles(const QStringList &openFileNames)    /*** Open files ***/
-{
-    showOpeningFiles(true);
-    ui->labelAnimation->hide();
-    ui->label_Progress->hide();
-    ui->label_Remaining->hide();
-    ui->label_RemTime->hide();
-    ui->progressBar->hide();
+    Progress prg(this, tr("OPENING FILES"));
+    prg.setModal(true);
+    setProgressEnabled(false);
     MediaInfo MI;
-    int i = 1;
-    int countFileNames = openFileNames.size();
-    while (i <= countFileNames)
-    {
-        const int numRows = ui->tableWidget->rowCount();
-        ui->tableWidget->setRowCount(numRows + 1);
-        const QString file = openFileNames.at(i-1);
+    Q_LOOP(i, 0, openFileNames.size()) {
+        const QString file = openFileNames.at(i);
         const QString inputFolder = QFileInfo(file).absolutePath();
         const QString inputFile = QFileInfo(file).fileName();
-        showOpeningFiles(inputFile);
-        showOpeningFiles(0);
-        QApplication::processEvents();
-        if (i == 1) _openDir = inputFolder;
-        MI.Open(file.toStdWString());
-        QString fmt_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"Format"));
-        QString width_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"Width"));
-        QString height_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"Height"));
-        QString size = width_qstr + "x" + height_qstr;
-        QString duration_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"Duration"));
-        double duration_double = 0.001 * duration_qstr.toDouble();
-        float duration_float = static_cast<float>(duration_double);
-        QString durationTime = timeConverter(duration_float);
-        QString fps_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"FrameRate"));
-        const QString status("");
-        const QString bitrate_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"BitRate"));
-        int bitrate_int = static_cast<int>(0.001 * bitrate_qstr.toDouble());        
-        QString matrix_coefficients = QString::fromStdWString(MI.Get(Stream_Video, 0, L"matrix_coefficients"));
-        const QString mtrx_coeff = matrix_coefficients.replace(" ", "").replace(".", "").replace("on-", "").replace("onstant", "");
-        QString mastering_display_luminance_qstr = QString::fromStdWString(MI.Get(Stream_Video, 0, L"MasteringDisplay_Luminance"));
-        QString mastering_display_luminance_rep = mastering_display_luminance_qstr.replace("min: ", "").replace("max: ", "").replace(" cd/m2", "");
-        QString min_luminance = mastering_display_luminance_rep.split(", ")[0];
-        QString max_luminance = mastering_display_luminance_rep.replace(min_luminance, "").replace(", ", "");
-        QString mastering_display_color_primaries = QString::fromStdWString(MI.Get(Stream_Video, 0, L"MasteringDisplay_ColorPrimaries"));       
-        int len = mastering_display_color_primaries.length();
-        QString white_coord = "";
-        QString chroma_coord = "";
-        if (len > 15) {
-            QStringList mdcp = mastering_display_color_primaries.split(",");
-            QString r = mdcp[0].replace("R: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
-            QString g = mdcp[1].replace(" G: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
-            QString b = mdcp[2].replace(" B: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
-            white_coord = mdcp[3].replace(" White point: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
-            chroma_coord = r + "," + g + "," + b;
-            mastering_display_color_primaries = "Undefined";
-        }
-
-        if (fmt_qstr == "") {
-            fmt_qstr = "Undef";
-        }
-        if (fps_qstr == "") {
-            fps_qstr = "Undef";
-        }
-        if (width_qstr == "") {
-            size = "Undef";
-        }
-        if (durationTime == "00:00:00") {
-            durationTime = "Undef";
-        }
-
-        const QString arr_items[] = {
-            inputFile, fmt_qstr, size, durationTime, fps_qstr,
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"DisplayAspectRatio")),
-            status, QString::number(bitrate_int),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"ChromaSubsampling")),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"BitDepth")),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"ColorSpace")),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"colour_range")),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"colour_primaries")).replace(".", ""),
-            mtrx_coeff,
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"transfer_characteristics")).replace(".", ""),
-            max_luminance, min_luminance,
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"MaxCLL")).replace(" cd/m2", ""),
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"MaxFALL")).replace(" cd/m2", ""),
-            mastering_display_color_primaries, inputFolder, QString::number(duration_double, 'f', 3),
-            chroma_coord, white_coord,
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"StreamSize")),
-            width_qstr, height_qstr,
-            QString::fromStdWString(MI.Get(Stream_Video, 0, L"Title")),
-            QString::fromStdWString(MI.Get(Stream_General, 0, L"Movie")),
-            QString::fromStdWString(MI.Get(Stream_General, 0, L"YEAR")),
-            QString::fromStdWString(MI.Get(Stream_General, 0, L"AUTHOR")),
-            QString::fromStdWString(MI.Get(Stream_General, 0, L"Performer")),
-            QString::fromStdWString(MI.Get(Stream_General, 0, L"Description"))
-        };
-
-        for (int column = ColumnIndex::FILENAME; column <= ColumnIndex::T_VIDEODESCR; column++) {
-            QTableWidgetItem *item = new QTableWidgetItem(arr_items[column]);
-            if (column >= ColumnIndex::FORMAT && column <= ColumnIndex::MASTERDISPLAY) {
-                item->setTextAlignment(Qt::AlignCenter);
+        if (MI.Open(file.toStdWString()) == 1) {
+            if (i == 0) {
+                m_openDir = inputFolder;
+                prg.show();
             }
-            ui->tableWidget->setItem(numRows, column, item);
-        }
-
-        QTableWidgetItem *item_startTime = new QTableWidgetItem("0");
-        QTableWidgetItem *item_endTime = new QTableWidgetItem("0");
-        ui->tableWidget->setItem(numRows, ColumnIndex::T_STARTTIME, item_startTime);
-        ui->tableWidget->setItem(numRows, ColumnIndex::T_ENDTIME, item_endTime);
-
-        int smplrt_int;
-        QString audioFormat("");
-        QString audioLang("");
-        QString audioTitle("");
-        QString smplrt("");
-        QString smplrt_qstr("");
-        QString audioCheckstate;
-        for (int j = 0; j < AMOUNT_AUDIO_STREAMS; j++) {
-            audioFormat = QString::fromStdWString(MI.Get(Stream_Audio, size_t(j), L"Format"));
-            audioLang = QString::fromStdWString(MI.Get(Stream_Audio, size_t(j), L"Language"));
-            audioTitle = QString::fromStdWString(MI.Get(Stream_Audio, size_t(j), L"Title"));
-            smplrt_qstr = QString::fromStdWString(MI.Get(Stream_Audio, size_t(j), L"SamplingRate"));
-            smplrt_int = static_cast<int>(smplrt_qstr.toFloat() / 1000);
-            audioCheckstate = "0";
-
-            if (smplrt_int != 0) {
-                smplrt = QString::number(smplrt_int);
-            } else {
-                smplrt = "";
+            prg.setText(inputFile);
+            prg.setPercent(0);
+            QApplication::processEvents();
+            const int numRows = ui->tableWidget->rowCount();
+            ui->tableWidget->setRowCount(numRows + 1);
+            QString fmt_qstr = VINFO(0, "Format");
+            QString width_qstr = VINFO(0, "Width");
+            QString height_qstr = VINFO(0, "Height");
+            QString size = (width_qstr != "") ? width_qstr + "x" + height_qstr : "Undef";
+            double duration_double = 0.001 * VINFO(0, "Duration").toDouble();
+            QString durationTime = Helper::timeConverter(static_cast<float>(duration_double));
+            QString fps_qstr = VINFO(0, "FrameRate");
+            const QString status("");
+            int bitrate_int = static_cast<int>(0.001 * VINFO(0, "BitRate").toDouble());
+            QString coeff = VINFO(0, "matrix_coefficients");
+            const QString mtrx_coeff = coeff.replace(" ", "").replace(".", "").replace("on-", "").replace("onstant", "");
+            QString luminance_qstr = VINFO(0, "MasteringDisplay_Luminance");
+            QString luminance_rep = luminance_qstr.replace("min: ", "").replace("max: ", "").replace(" cd/m2", "");
+            QString min_luminance = luminance_rep.split(", ")[0];
+            QString max_luminance = luminance_rep.replace(min_luminance, "").replace(", ", "");
+            QString color_prim = VINFO(0, "MasteringDisplay_ColorPrimaries");
+            int len = color_prim.length();
+            QString white_coord = "";
+            QString chroma_coord = "";
+            if (len > 15) {
+                QStringList mdcp = color_prim.split(",");
+                QString r = mdcp[0].replace("R: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
+                QString g = mdcp[1].replace(" G: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
+                QString b = mdcp[2].replace(" B: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
+                white_coord = mdcp[3].replace(" White point: ", "").replace("x=", "").replace(" ", ",").replace("y=", "").replace("000", "0");
+                chroma_coord = r + "," + g + "," + b;
+                color_prim = "Undefined";
             }
-            if (audioFormat != "") {
-                audioFormat = audioFormat + "  " + smplrt + " kHz";
-                audioCheckstate = "1";
-            }
-            QTableWidgetItem *newItem_audio = new QTableWidgetItem(audioFormat);
-            QTableWidgetItem *newItem_lang = new QTableWidgetItem(audioLang);
-            QTableWidgetItem *newItem_title = new QTableWidgetItem(audioTitle);
-            QTableWidgetItem *newItem_checkstate = new QTableWidgetItem(audioCheckstate);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_AUDIO_1, newItem_audio);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_AUDIOLANG_1, newItem_lang);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_AUDIOTITLE_1, newItem_title);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_AUDIOCHECK_1, newItem_checkstate);
-        }
 
-        QString subtitleFormat("");
-        QString subtitleLang("");
-        QString subtitleTitle("");
-        QString subtitleCheckstate;
-        for (int j = 0; j < AMOUNT_SUBTITLES; j++) {
-            subtitleFormat = QString::fromStdWString(MI.Get(Stream_Text, size_t(j), L"Format"));
-            subtitleLang = QString::fromStdWString(MI.Get(Stream_Text, size_t(j), L"Language"));
-            subtitleTitle = QString::fromStdWString(MI.Get(Stream_Text, size_t(j), L"Title"));
-            subtitleCheckstate = "0";
+            if (fmt_qstr == "")
+                fmt_qstr = "Undef";
+            if (fps_qstr == "")
+                fps_qstr = "Undef";
+            if (durationTime == "00:00:00")
+                durationTime = "Undef";
 
-            if (subtitleFormat != "") {
-                subtitleCheckstate = "1";
+            const QString arr_items[] = {
+                inputFile,
+                fmt_qstr,
+                size,
+                durationTime,
+                fps_qstr,
+                VINFO(0, "DisplayAspectRatio"),
+                status,
+                numToStr(bitrate_int),
+                VINFO(0, "ChromaSubsampling"),
+                VINFO(0, "BitDepth"),
+                VINFO(0, "ColorSpace"),
+                VINFO(0, "colour_range"),
+                VINFO(0, "colour_primaries").replace(".", ""),
+                mtrx_coeff,
+                VINFO(0, "transfer_characteristics").replace(".", ""),
+                max_luminance,
+                min_luminance,
+                VINFO(0, "MaxCLL").replace(" cd/m2", ""),
+                VINFO(0, "MaxFALL").replace(" cd/m2", ""),
+                color_prim,
+                inputFolder,
+                QString::number(duration_double, 'f', 3),
+                chroma_coord,
+                white_coord,
+                VINFO(0, "StreamSize"),
+                width_qstr,
+                height_qstr,
+                VINFO(0, "Title"),
+                GETINFO(Stream_General, 0, "Movie"),
+                GETINFO(Stream_General, 0, "YEAR"),
+                GETINFO(Stream_General, 0, "AUTHOR"),
+                GETINFO(Stream_General, 0, "Performer"),
+                GETINFO(Stream_General, 0, "Description")
+            };
+
+            m_data.resize(numRows + 1);
+            m_data[numRows].clear();
+            Q_LOOP(j, 27, 33)
+                m_data[numRows].videoMetadata.push_back(arr_items[j]);
+
+            for (int column = ColumnIndex::FILENAME; column <= ColumnIndex::T_HEIGHT; column++) {
+                QTableWidgetItem *__item = new QTableWidgetItem(arr_items[column]);
+                if (column >= ColumnIndex::FORMAT && column <= ColumnIndex::MASTERDISPLAY)
+                    __item->setTextAlignment(Qt::AlignCenter);
+                ui->tableWidget->setItem(numRows, column, __item);
             }
-            QTableWidgetItem *newItem_subtitle = new QTableWidgetItem(subtitleFormat);
-            QTableWidgetItem *newItem_lang = new QTableWidgetItem(subtitleLang);
-            QTableWidgetItem *newItem_title = new QTableWidgetItem(subtitleTitle);
-            QTableWidgetItem *newItem_checkstate = new QTableWidgetItem(subtitleCheckstate);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_SUBTITLE_1, newItem_subtitle);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_SUBLANG_1, newItem_lang);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_TITLESUB_1, newItem_title);
-            ui->tableWidget->setItem(numRows, j + ColumnIndex::T_SUBCHECK_1, newItem_checkstate);
+
+            QTableWidgetItem *__startTime = new QTableWidgetItem("0");
+            QTableWidgetItem *__endTime = new QTableWidgetItem("0");
+            ui->tableWidget->setItem(numRows, ColumnIndex::T_STARTTIME, __startTime);
+            ui->tableWidget->setItem(numRows, ColumnIndex::T_ENDTIME, __endTime);
+
+            Q_LOOP(j, 0, MAX_AUDIO_STREAMS) {
+                QString audioFormat = AINFO(size_t(j), "Format");
+                const int smplrt_int = static_cast<int>(AINFO(size_t(j), "SamplingRate").toFloat() / 1000);
+                const QString smplrt = (smplrt_int != 0) ? numToStr(smplrt_int) : "";
+                if (!audioFormat.isEmpty()) {
+                    audioFormat += QString("  %1 kHz").arg(smplrt);
+                    _CHECKS(numRows, audioChecks).push_back(Helper::isSupported(audioFormat));
+                    _FIELDS(numRows, audioFormats).push_back(audioFormat);
+                    _FIELDS(numRows, audioChannels).push_back(AINFO(size_t(j), "Channels"));
+                    _FIELDS(numRows, audioChLayouts).push_back(AINFO(size_t(j), "ChannelLayout"));
+                    _FIELDS(numRows, audioDuration).push_back(AINFO(size_t(j), "Duration"));
+                    _FIELDS(numRows, audioLangs).push_back(AINFO(size_t(j), "Language"));
+                    _FIELDS(numRows, audioTitles).push_back(AINFO(size_t(j), "Title"));
+                    const QString deflt = AINFO(size_t(j), "Default");
+                    _CHECKS(numRows, audioDef).push_back(deflt == "Yes" ? true : false);
+                } else {
+                    break;
+                }
+            }
+
+            Q_LOOP(j, 0, MAX_SUBTITLES) {
+                const QString subtitleFormat = SINFO(size_t(j), "Format");
+                if (!subtitleFormat.isEmpty()) {
+                    _CHECKS(numRows, subtChecks).push_back(Helper::isSupported(subtitleFormat));
+                    _FIELDS(numRows, subtFormats).push_back(subtitleFormat);
+                    _FIELDS(numRows, subtDuration).push_back(SINFO(size_t(j), "Duration"));
+                    _FIELDS(numRows, subtLangs).push_back(SINFO(size_t(j), "Language"));
+                    _FIELDS(numRows, subtTitles).push_back(SINFO(size_t(j), "Title"));
+                    const QString deflt = SINFO(size_t(j), "Default");
+                    _CHECKS(numRows, subtDef).push_back(deflt == "Yes" ? true : false);
+                } else {
+                    break;
+                }
+            }
+            MI.Close();
+            prg.setPercent(50);
+            QApplication::processEvents();
+            ui->tableWidget->selectRow(ui->tableWidget->rowCount() - 1);
+            QApplication::processEvents();
+            prg.setPercent(100);
+            QApplication::processEvents();
+    #if defined (Q_OS_UNIX)
+            usleep(50000);
+    #elif defined (Q_OS_WIN64)
+            Sleep(50);
+    #endif
+        } else {
+            showInfoMessage(tr("File: \'%1\' cannot be opened!").arg(inputFile));
         }
-        MI.Close();
-        showOpeningFiles(50);
-        QApplication::processEvents();
-        ui->tableWidget->selectRow(ui->tableWidget->rowCount() - 1);
-        QApplication::processEvents();
-        showOpeningFiles(100);
-        QApplication::processEvents();
-#if defined (Q_OS_UNIX)
-        usleep(50000);
-#elif defined (Q_OS_WIN64)
-        Sleep(50);
-#endif
-        i++;
     }
-    showOpeningFiles(false);
 }
 
-void Widget::on_tableWidget_itemSelectionChanged()
+void MainWindow::onTableSelectionChanged()
 {
-    ui->labelAnimation->hide();
-    ui->label_Progress->hide();
-    ui->label_Remaining->hide();
-    ui->label_RemTime->hide();
-    ui->progressBar->hide();
+    setProgressEnabled(false);
     ui->labelSplitPreview->clear();
-    ui->horizontalSlider->blockSignals(true);
-    ui->horizontalSlider->setValue(0);
-    ui->horizontalSlider->blockSignals(false);
+    ui->sliderTimeline->blockSignals(true);
+    ui->sliderTimeline->setValue(0);
+    ui->sliderTimeline->blockSignals(false);
     ui->lineEditCurTime->clear();
     ui->lineEditStartTime->clear();
     ui->lineEditEndTime->clear();
 
-    // **************************** Disable audio widgets ***********************************//
-    QList <QCheckBox *> checkBoxAudio = ui->frameTab_2->findChildren<QCheckBox *>();
-    QList <QLineEdit *> lineEditAudio = ui->frameTab_2->findChildren<QLineEdit *>();
-    QList <QLabel*> labelsAudio = ui->frameTab_2->findChildren<QLabel*>();
-    foreach (QCheckBox *checkBox, checkBoxAudio) {
-        checkBox->setVisible(false);
-    }
-    foreach (QLineEdit *lineEdit, lineEditAudio) {
-        lineEdit->setVisible(false);
-    }
-    foreach (QLabel *label, labelsAudio) {
-        label->setVisible(false);
-    }
-    audioThumb->setVisible(true);
+    //*********** Disable audio widgets ***************//
+    ui->streamAudio->clearList();
+    //ui->streamAudioExtern->clearList();
+    m_pAudioLabel->setVisible(true);
 
-    // **************************** Disable subtitle widgets ***********************************//
-    QList <QCheckBox *> checkBoxSubtitle = ui->frameTab_3->findChildren<QCheckBox *>();
-    QList <QLineEdit *> lineEditSubtitle = ui->frameTab_3->findChildren<QLineEdit *>();
-    QList <QLabel*> labelsSubtitle = ui->frameTab_3->findChildren<QLabel*>();
-    foreach (QCheckBox *checkBox, checkBoxSubtitle) {
-        checkBox->setVisible(false);
-    }
-    foreach (QLineEdit *lineEdit, lineEditSubtitle) {
-        lineEdit->setVisible(false);
-    }
-    foreach (QLabel *label, labelsSubtitle) {
-        label->setVisible(false);
-    }
-    subtitleThumb->setVisible(true);
+    //*********** Disable subtitle widgets *************//
+    ui->streamSubtitle->clearList();
+    m_pSubtitleLabel->setVisible(true);
 
-    _row = ui->tableWidget->currentRow();
-    if (_row != -1) {
-        raiseThumb->hide();
+    m_row = ui->tableWidget->currentRow();
+    if (m_row != -1) {
+        m_pTableLabel->hide();
         get_current_data();
 
     } else {
-        // ********************************* Reset widgets ***************************************//
-        raiseThumb->show();
-        preview_pixmap = QPixmap();
-        ui->labelThumb->clear();
+        //************* Reset widgets ******************//
+        m_pTableLabel->show();
+        m_preview_pixmap = QPixmap();
+        ui->labelPreview->clear();
         ui->textBrowser_1->clear();
         ui->textBrowser_2->clear();
-        ui->labelThumb->setText(tr("Preview"));
+        ui->labelPreview->setText(tr("Preview"));
         ui->label_source->setText("");
         ui->label_output->setText("");
-        ui->horizontalSlider->setMaximum(0);
+        ui->sliderTimeline->setMaximum(0);
 
-        // **************************** Reset metadata widgets ***********************************//
+        //************* Reset widgets ******************//
         QList<QLineEdit *> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit *>();
         foreach (QLineEdit *lineEdit, linesEditMetadata) {
             lineEdit->clear();
             lineEdit->setEnabled(false);
         }
 
-        // **************************** Reset audio widgets ***********************************//
-        foreach (QLineEdit *lineEdit, lineEditAudio) {
-            lineEdit->clear();
-        }
-        foreach (QCheckBox *checkBox, checkBoxAudio) {
-            checkBox->setChecked(false);
-        }
+        //********** Reset video variables *************//
+        m_dur = 0.0;
+        m_input_file = "";
+        m_stream_size = "";
+        m_width = "";
+        m_height = "";
+        m_fmt = "";
+        m_fps = "";
+        m_fr_count = 0;
+        m_startTime = 0.0;
+        m_endTime = 0.0;
 
-        // **************************** Reset subtitle widgets ***********************************//
-        foreach (QLineEdit *lineEdit, lineEditSubtitle) {
-            lineEdit->clear();
-        }
-        foreach (QCheckBox *checkBox, checkBoxSubtitle) {
-            checkBox->setChecked(false);
-        }
-
-        // **************************** Reset video variables ***********************************//
-        _dur = 0.0;
-        _input_file = "";
-        _stream_size = "";
-        _width = "";
-        _height = "";
-        _fmt = "";
-        _fps = "";
-        _fr_count = 0;
-        _startTime = 0.0;
-        _endTime = 0.0;
-
-        _hdr[CUR_COLOR_RANGE] = "";    // color range
-        _hdr[CUR_COLOR_PRIMARY] = "";  // color primary
-        _hdr[CUR_COLOR_MATRIX] = "";   // color matrix
-        _hdr[CUR_TRANSFER] = "";       // transfer
-        _hdr[CUR_MAX_LUM] = "";        // max lum
-        _hdr[CUR_MIN_LUM] = "";        // min lum
-        _hdr[CUR_MAX_CLL] = "";        // max cll
-        _hdr[CUR_MAX_FALL] = "";       // max fall
-        _hdr[CUR_MASTER_DISPLAY] = ""; // master display
-        _hdr[CUR_CHROMA_COORD] = "";   // chr coord
-        _hdr[CUR_WHITE_COORD] = "";    // white coord
-
-        // **************************** Reset metadata variables ***********************************//
-        _videoMetadata[VIDEO_TITLE] = "";
-        _videoMetadata[VIDEO_AUTHOR] = "";
-        _videoMetadata[VIDEO_YEAR] = "";
-        _videoMetadata[VIDEO_PERFORMER] = "";
-        _videoMetadata[VIDEO_DESCRIPTION] = "";
-        _videoMetadata[VIDEO_MOVIENAME] = "";
-
-        // **************************** Reset audio variables ***********************************//
-        for (int i = 0; i < AMOUNT_AUDIO_STREAMS; i++) {
-            _audioStreamCheckState[i] = 0;
-            _audioLang[i] = "";
-            _audioTitle[i] = "";
-        }
-
-        // **************************** Reset subtitle variables ***********************************//
-        for (int i = 0; i < AMOUNT_SUBTITLES; i++) {
-            _subtitleCheckState[i] = 0;
-            _subtitleLang[i] = "";
-            _subtitleTitle[i] = "";
-        }
+        //************** Reset data ********************//
+        Q_LOOP(i, 0, AMOUNT_HDR_PARAMS)
+            m_hdr[i] = "";
     }
 }
 
-void Widget::resizeTableRows(int rows_height)
+void MainWindow::resizeTableRows(int rows_height)
 {
-    QHeaderView *verticalHeader = ui->tableWidget->verticalHeader();
-    verticalHeader->setSectionResizeMode(QHeaderView::Fixed);
-    verticalHeader->setDefaultSectionSize(rows_height);
-    if (rows_height == 25) {
+    QHeaderView *vertHeader = ui->tableWidget->verticalHeader();
+    vertHeader->setSectionResizeMode(QHeaderView::Fixed);
+    vertHeader->setDefaultSectionSize(rows_height);
+    if (rows_height == ROWHEIGHT) {
         ui->tableWidget->setIconSize(QSize(16, 16));
     } else {
-        int rows_width = static_cast<int>(round(1.777f*rows_height));
+        const int rows_width = static_cast<int>(round(1.777f*rows_height));
         ui->tableWidget->setIconSize(QSize(rows_width, rows_height));
     }
-    int numRows = ui->tableWidget->rowCount();
+    const int numRows = ui->tableWidget->rowCount();
     if (numRows > 0) {
         int row = ui->tableWidget->currentRow();
         ui->tableWidget->clearSelection();
         if (numRows > 1) {
-            for (int i = 0; i < numRows; i++) {
+            for (int i = 0; i < numRows; i++)
                 ui->tableWidget->selectRow(i);
-            }
         }
         ui->tableWidget->selectRow(row);
     }
 }
 
-void Widget::resetView()
+void MainWindow::resetView()
 {
     const QString defaultSettings(":/resources/data/default_settings.ini");
-    QSettings *settings = new QSettings(defaultSettings, QSettings::IniFormat, this);
-    if (settings->value("Version").toInt() == SETTINGS_VERSION) {
-        // Restore Main Window
-        settings->beginGroup("MainWindow");
-        window->restoreState(settings->value("MainWindow/state").toByteArray());
-        settings->endGroup();
+    QSettings stn(defaultSettings, QSettings::IniFormat, this);
+    if (stn.value("Version").toInt() == SETTINGS_VERSION) {
+        // Restore DocksContainer
+        stn.beginGroup("DocksContainer");
+        m_pDocksContainer->restoreState(stn.value("DocksContainer/state").toByteArray());
+        stn.endGroup();
     }
-    delete settings;
 
     QList<int> dockSizesX = {};
     QList<int> dockSizesY = {};
-    float coeffX[DOCKS_COUNT] = {0.25f, 0.04f, 0.48f, 0.48f, 0.25f, 0.25f, 0.25f, 0.25f};
-    float coeffY[DOCKS_COUNT] = {0.9f, 0.1f, 0.1f, 0.1f, 0.9f, 0.9f, 0.9f, 0.9f};
-    for (int ind = 0; ind < DOCKS_COUNT; ind++) {
-        int dockWidth = static_cast<int>(coeffX[ind] * this->width());
-        int dockHeight = static_cast<int>(coeffY[ind] * this->height());
+    float coeffX[DOCKS_COUNT] = {0.39f, 0.39f, 0.61f, 0.23f, 0.23f, 0.23f, 0.23f, 0.39f};
+    float coeffY[DOCKS_COUNT] = {0.16f, 0.5f, 0.1f, 0.9f, 0.9f, 0.9f, 0.9f, 0.3f};
+    Q_LOOP(i, 0, DOCKS_COUNT) {
+        int dockWidth = static_cast<int>(coeffX[i] * this->width());
+        int dockHeight = static_cast<int>(coeffY[i] * this->height());
         dockSizesX.append(dockWidth);
         dockSizesY.append(dockHeight);
     }
     setDocksParameters(dockSizesX, dockSizesY);
 }
 
-void Widget::provideContextMenu(const QPoint &position)     /*** Call table items menu  ***/
+void MainWindow::provideContextMenu(const QPoint &pos)     // Call table items menu
 {
-    QTableWidgetItem *item = ui->tableWidget->itemAt(0, position.y());
-    if (item != nullptr) {
-        itemMenu->exec(ui->tableWidget->mapToGlobal(QPoint(position.x(), position.y() + 35)));
+    QTableWidgetItem *item = ui->tableWidget->itemAt(0, pos.y());
+    if (item)
+        m_pItemMenu->exec(ui->tableWidget->mapToGlobal(pos + QPoint(0, 35)));
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)     // Drag enter event
+{
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
     }
 }
 
-void Widget::dragEnterEvent(QDragEnterEvent* event)     /*** Drag enter event ***/
-{
-    event->acceptProposedAction();
-}
-
-void Widget::dragMoveEvent(QDragMoveEvent* event)     /*** Drag move event ***/
-{
-    event->acceptProposedAction();
-}
-
-void Widget::dragLeaveEvent(QDragLeaveEvent* event)     /*** Drag leave event ***/
-{
-    event->accept();
-}
-
-void Widget::dropEvent(QDropEvent* event)     /*** Drag & Drop ***/
+void MainWindow::dropEvent(QDropEvent* event)     // Drag & Drop
 {
     const QMimeData *mimeData = event->mimeData();
-    if (mimeData->hasUrls())
-    {
+    if (mimeData->hasUrls()) {
         QStringList formats;
         QStringList pathList;
         QList<QUrl> urlList = mimeData->urls();
-        for (int i = 0; i < urlList.size() && i < 32; ++i)
-        {
+        for (int i = 0; i < urlList.size() && i < 32; ++i) {
             pathList.append(urlList.at(i).toLocalFile());
             formats.append(QMimeDatabase().mimeTypeForFile(pathList.at(i)).name());
         }
-        if (!formats.filter("audio/").empty() || !formats.filter("video/").empty())
-        {
+        if (!formats.filter("audio/").empty() || !formats.filter("video/").empty()) {
             openFiles(pathList);
-            event->acceptProposedAction();
-            return;
         }
     }
-    event->ignore();
 }
 
-QString Widget::timeConverter(const float &time)     /*** Time converter to hh:mm:ss ***/
-{    
-    const int h = static_cast<int>(trunc(time / 3600));
-    const int m = static_cast<int>(trunc((time - float(h * 3600)) / 60));
-    const int s = static_cast<int>(round(time - float(h * 3600) - float(m * 60)));
-    const QString hrs = QString::number(h).rightJustified(2, '0');
-    const QString min = QString::number(m).rightJustified(2, '0');
-    const QString sec = QString::number(s).rightJustified(2, '0');
-    return QString("%1:%2:%3").arg(hrs, min, sec);
-}
-
-void Widget::on_comboBoxMode_currentIndexChanged(int index)
+void MainWindow::onComboModeChanged(int index)
 {
-    _batch_mode = (index == 0) ? false : true;
+    m_batch_mode = (index == 0) ? false : true;
 }
 
-void Widget::on_horizontalSlider_resize_valueChanged(int value)
+void MainWindow::onSliderResizeChanged(int value)
 {
-    _rowSize = value;
+    m_rowHeight = value;
     resizeTableRows(value);
-}
-
-/************************************************
-** Preview Window
-************************************************/
-
-QString Widget::setThumbnail(QString curFilename,
-                             const double &time,
-                             const int &quality,
-                             const int &destination)
-{
-    QString qualityParam("-vf scale=480:-1 -compression_level 10 -pix_fmt rgb24");
-    if (quality == PreviewRes::RES_LOW) qualityParam = QString("-vf scale=144:-1,format=pal8,dctdnoiz=4.5");
-    const QString time_qstr = QString::number(time, 'f', 3);
-    const QString tmb_name = curFilename.replace(".", "_").replace(" ", "_") + time_qstr;
-    QString tmb_file = _thumb_path + QString("/") + tmb_name + QString(".png");
-    QFile tmb(tmb_file);
-    if (!tmb.exists()) {
-        QStringList cmd;
-        cmd << "-hide_banner" << "-ss" << time_qstr << "-i" << _input_file
-            << qualityParam.split(" ") << "-vframes" << "1" << "-y" << tmb_file;
-        processThumbCreation->start("ffmpeg", cmd);
-        processThumbCreation->waitForFinished();
-    }
-    if (!tmb.exists()) tmb_file = ":/resources/images/no_preview.png";
-    preview_pixmap = QPixmap(tmb_file);
-    QPixmap pix_scaled;
-    if (destination == PreviewDest::PREVIEW) {
-        pix_scaled = preview_pixmap.scaled(ui->frame_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        ui->labelThumb->setPixmap(pix_scaled);
-    } else
-    if (destination == PreviewDest::SPLITTER) {
-        pix_scaled = preview_pixmap.scaled(ui->labelSplitPreview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        ui->labelSplitPreview->setPixmap(pix_scaled);
-    }
-    return tmb_file;
-}
-
-void Widget::repeatHandler_Type_2()
-{
-    //std::cout << "Call by timer... " << std::endl;
-    if (_row != -1) setThumbnail(_curFilename, _curTime, PreviewRes::RES_HIGH, PreviewDest::SPLITTER);
 }
 
 /************************************************
 ** Source Window
 ************************************************/
 
-void Widget::on_buttonHotInputFile_clicked()
+QString MainWindow::setThumbnail(QString curFilename,
+                             const double time,
+                             const int quality,
+                             const int destination)
 {
-    on_actionAdd_clicked();
+    QString qualityParam("-vf scale=480:-1 -compression_level 10 -pred mixed "
+                         "-pix_fmt rgb24 -sws_flags +accurate_rnd+full_chroma_int");
+    if (quality == PreviewRes::RES_LOW)
+        qualityParam = QString("-vf scale=144:-1,format=pal8,dctdnoiz=4.5");
+    const QString time_qstr = QString::number(time, 'f', 3);
+    const QString tmb_name = curFilename.replace(".", "_").replace(" ", "_") + time_qstr;
+    QString tmb_file = THUMBNAILPATH + QString("/%1.png").arg(tmb_name);
+    QFile tmb(tmb_file);
+    if (!tmb.exists()) {
+        QString inpParam("-hide_banner -probesize 100M -analyzeduration 50M");
+        if (destination == PreviewDest::PREVIEW)
+            inpParam += " -skip_frame nokey";
+        QStringList cmd;
+        cmd << inpParam.split(" ") << "-ss" << time_qstr << "-i" << m_input_file
+            << qualityParam.split(" ") << "-vframes" << "1" << "-y" << tmb_file;
+        m_pProcessThumbCreation = new QProcess(this);
+        m_pProcessThumbCreation->start("ffmpeg", cmd);
+        m_pProcessThumbCreation->waitForFinished();
+        delete m_pProcessThumbCreation, m_pProcessThumbCreation = nullptr;
+    }
+    if (!tmb.exists())
+        tmb_file = ":/resources/images/no_preview.png";
+    m_preview_pixmap = QPixmap(tmb_file);
+    QPixmap pix_scaled;
+    if (destination == PreviewDest::PREVIEW) {
+        pix_scaled = m_preview_pixmap.scaled(ui->framePreview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        ui->labelPreview->setPixmap(pix_scaled);
+    } else
+    if (destination == PreviewDest::SPLITTER) {
+        pix_scaled = m_preview_pixmap.scaled(ui->labelSplitPreview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        ui->labelSplitPreview->setPixmap(pix_scaled);
+    }
+    return tmb_file;
+}
+
+void MainWindow::repeatHandler_Type_2()
+{
+    if (m_row != -1)
+        setThumbnail(m_curFilename, m_curTime, PreviewRes::RES_HIGH, PreviewDest::SPLITTER);
 }
 
 /************************************************
 ** Output Window
 ************************************************/
 
-void Widget::get_output_filename()  /*** Get output data ***/
+void MainWindow::get_output_filename()  // Get output data
 {
     ui->textBrowser_2->clear();
-    ui->textBrowser_2->setText(_cur_param[CurParamIndex::OUTPUT_PARAM]);
-    QString file_without_ext("");
-    QString suffix("");
-    QString prefix("");
-    int _CODEC = _cur_param[CurParamIndex::CODEC].toInt();
-    int _CONTAINER = _cur_param[CurParamIndex::CONTAINER].toInt();
-    extension = updateFieldContainer(_CODEC, _CONTAINER).toLower();
-
-    if (_suffixType == 0) {
-        QString row_qstr = QString::number(_row);
+    ui->textBrowser_2->setText(m_curParams[CurParamIndex::OUTPUT_PARAM]);
+    const int _CODEC = m_curParams[CurParamIndex::CODEC].toInt();
+    const int _CONTAINER = m_curParams[CurParamIndex::CONTAINER].toInt();
+    Tables t;
+    extension = t.arr_container[_CODEC][_CONTAINER].toLower();
+    QString suffix;
+    if (m_suffixType == 0) {
+        QString row_qstr = numToStr(m_row);
         std::ostringstream sstr;
         sstr << std::setw(4) << std::setfill('0') << row_qstr.toStdString();
         std::string counter = sstr.str();
-        suffix = _suffixName + QString::fromStdString(counter);
+        suffix = m_suffixName + QString::fromStdString(counter);
     } else {
         QTime ct = QTime::currentTime();
         QDate cd = QDate::currentDate();
@@ -2626,174 +2099,59 @@ void Widget::get_output_filename()  /*** Get output data ***/
         suffix = QString("_") + ct_qstr.remove(":") + QString("_") + cd_qstr.remove(".");
     }
 
-    if (_prefxType == 0) {
-        std::wstring file_name_wstr = _curFilename.toStdWString();
+    QString prefix = m_prefixName;
+    if (m_prefxType == 0) {
+        std::wstring file_name_wstr = m_curFilename.toStdWString();
         std::wstring::size_type separator = file_name_wstr.rfind('.');
-        if (separator != std::wstring::npos) {
-            file_without_ext = QString::fromStdWString(file_name_wstr.substr(0, separator));
-        } else {
-            file_without_ext = _curFilename;
-        }
+        const QString file_without_ext = (separator != std::wstring::npos) ?
+                    QString::fromStdWString(file_name_wstr.substr(0, separator)) : m_curFilename;
         prefix = file_without_ext;
-    } else {
-        prefix = _prefixName;
     }
 
-    QString _output_file_name = prefix + suffix + QString(".") + extension;
+    const QString _output_file_name = QString("%1%2.%3").arg(prefix, suffix, extension);
     ui->label_output->setText(_output_file_name);
-    if (_output_folder == "") {
-        _output_file = _curPath + QString("/") + _output_file_name;
-    } else {
-        _output_file = _output_folder + QString("/") + _output_file_name;
-    }
-    if (_temp_folder == "") {
-        _temp_file = _curPath + QString("/temp.mkv");
-    } else {
-        _temp_file = _temp_folder + QString("/temp.mkv");
-    }
+    m_output_file = (m_output_folder == "") ? m_curPath : m_output_folder;
+    m_output_file += QString("/") + _output_file_name;
+
+    m_temp_file = (m_temp_folder == "") ? m_curPath : m_temp_folder;
+    m_temp_file += QString("/temp.mkv");
 }
 
-void Widget::on_buttonHotOutputFile_clicked()
+void MainWindow::onSetOutFolder()
 {
-    const QString output_folder_name = callFileDialog(tr("Select output folder"));
-    if (output_folder_name.isEmpty()) return;
-    _output_folder = output_folder_name;
-    if (_row != -1) get_output_filename();
-}
-
-QString Widget::callFileDialog(const QString title)  /*** Call file dialog ***/
-{
-    QFileDialog selectFolderWindow(nullptr);
-    selectFolderWindow.setWindowTitle(title);
-    selectFolderWindow.setMinimumWidth(600);
-    selectFolderWindow.setWindowFlags(Qt::Dialog | Qt::SubWindow);
-    if (_desktopEnv == "gnome") selectFolderWindow.setOption(QFileDialog::DontUseNativeDialog, true);
-    selectFolderWindow.setFileMode(QFileDialog::DirectoryOnly);
-    selectFolderWindow.setAcceptMode(QFileDialog::AcceptOpen);
-    QString directory = QDir::homePath();
-    if (_output_folder != "") directory = _output_folder;
-    selectFolderWindow.setDirectory(directory);
-    if (selectFolderWindow.exec() == QFileDialog::Accepted) {
-        return selectFolderWindow.selectedFiles().at(0);
+    QStringList result;
+    Helper::openFileDialog(Helper::FileDialogType::SELECTFOLDER,
+                           tr("Select output folder"),
+                           m_output_folder,
+                           result);
+    if (!result.isEmpty()) {
+        m_output_folder = result.at(0);
+        if (m_row != -1)
+            get_output_filename();
     }
-    return QString("");
 }
 
 /************************************************
 ** Metadata Window
 ************************************************/
 
-void Widget::on_lineEditTitleVideo_editingFinished()
+void MainWindow::onClearMetadata()
 {
-    if (_row != -1) {
-        if (!ui->lineEditTitleVideo->isModified()) {
-            return;
-        }
-        ui->lineEditTitleVideo->setModified(false);
-        QString videoTitle = ui->lineEditTitleVideo->text();
-        QTableWidgetItem *newItem_videoTitle = new QTableWidgetItem(videoTitle);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEOTITLE, newItem_videoTitle);
-        _videoMetadata[VIDEO_TITLE] = videoTitle;
+    if (m_row != -1) {
+        auto linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
+        foreach (QLineEdit *lineEdit, linesEditMetadata)
+            MainWindowPrivate::clearLineEdit(lineEdit);
+        ui->frameMiddle->setFocus();
     }
 }
 
-void Widget::on_lineEditAuthorVideo_editingFinished()
+void MainWindow::onUndoMetadata()
 {
-    if (_row != -1) {
-        if (!ui->lineEditAuthorVideo->isModified()) {
-            return;
-        }
-        ui->lineEditAuthorVideo->setModified(false);
-        QString videoAuthor = ui->lineEditAuthorVideo->text();
-        QTableWidgetItem *newItem_videoAuthor = new QTableWidgetItem(videoAuthor);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEOAUTHOR, newItem_videoAuthor);
-        _videoMetadata[VIDEO_AUTHOR] = videoAuthor;
-    }
-}
-
-void Widget::on_lineEditYearVideo_editingFinished()
-{
-    if (_row != -1) {
-        if (!ui->lineEditYearVideo->isModified()) {
-            return;
-        }
-        ui->lineEditYearVideo->setModified(false);
-        QString videoYear = ui->lineEditYearVideo->text();
-        QTableWidgetItem *newItem_videoYear = new QTableWidgetItem(videoYear);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEOYEAR, newItem_videoYear);
-        _videoMetadata[VIDEO_YEAR] = videoYear;
-    }
-}
-
-void Widget::on_lineEditPerfVideo_editingFinished()
-{
-    if (_row != -1) {
-        if (!ui->lineEditPerfVideo->isModified()) {
-            return;
-        }
-        ui->lineEditPerfVideo->setModified(false);
-        QString videoPerf = ui->lineEditPerfVideo->text();
-        QTableWidgetItem *newItem_videoPerf = new QTableWidgetItem(videoPerf);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEOPERF, newItem_videoPerf);
-        _videoMetadata[VIDEO_PERFORMER] = videoPerf;
-    }
-}
-
-void Widget::on_lineEditMovieNameVideo_editingFinished()
-{
-    if (_row != -1) {
-        if (!ui->lineEditMovieNameVideo->isModified()) {
-            return;
-        }
-        ui->lineEditMovieNameVideo->setModified(false);
-        QString videoMovieName = ui->lineEditMovieNameVideo->text();
-        QTableWidgetItem *newItem_videoMovieName = new QTableWidgetItem(videoMovieName);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEOMOVIENAME, newItem_videoMovieName);
-        _videoMetadata[VIDEO_MOVIENAME] = videoMovieName;
-    }
-}
-
-void Widget::on_lineEditDescriptionVideo_editingFinished()
-{
-    if (_row != -1) {
-        if (!ui->lineEditDescriptionVideo->isModified()) {
-            return;
-        }
-        ui->lineEditDescriptionVideo->setModified(false);
-        QString videoDescription = ui->lineEditDescriptionVideo->text();
-        QTableWidgetItem *newItem_videoDescription = new QTableWidgetItem(videoDescription);
-        ui->tableWidget->setItem(_row, ColumnIndex::T_VIDEODESCR, newItem_videoDescription);
-        _videoMetadata[VIDEO_DESCRIPTION] = videoDescription;
-    }
-}
-
-void Widget::on_actionClearMetadata_clicked()
-{
-    if (_row != -1) {
-        QList<QLineEdit*> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
-        foreach (QLineEdit *lineEdit, linesEditMetadata) {
-            lineEdit->clear();
-            lineEdit->insert("");
-            lineEdit->setFocus();
-            lineEdit->setModified(true);
-        }
-        ui->frame_middle->setFocus();
-    }
-}
-
-void Widget::on_actionUndoMetadata_clicked()
-{
-    if (_row != -1) {
-        QList<QLineEdit*> linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
-        foreach (QLineEdit *lineEdit, linesEditMetadata) {
-            lineEdit->undo();
-            if (lineEdit->text() != "") {
-                lineEdit->setFocus();
-                lineEdit->setCursorPosition(0);
-                lineEdit->setModified(true);
-            }
-        }
-        ui->frame_middle->setFocus();
+    if (m_row != -1) {
+        auto linesEditMetadata = ui->frameTab_1->findChildren<QLineEdit*>();
+        foreach (QLineEdit *lineEdit, linesEditMetadata)
+            MainWindowPrivate::undoLineEdit(lineEdit);
+        ui->frameMiddle->setFocus();
     }
 }
 
@@ -2801,60 +2159,91 @@ void Widget::on_actionUndoMetadata_clicked()
 ** Streams Window
 ************************************************/
 
-void Widget::on_actionClearAudioTitles_clicked()
+void MainWindow::onAddExtStream()
 {
-    if (_row != -1) {
-        for (int stream = 0; stream < AMOUNT_AUDIO_STREAMS; stream++) {
-            QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-                + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-            lineEditTitleAudio->clear();
-            lineEditTitleAudio->insert("");
-            lineEditTitleAudio->setFocus();
-            lineEditTitleAudio->setModified(true);
+    if (m_row != -1) {
+        const int ind = ui->tabWidgetStreams->currentIndex();
+        QStringList result;
+        Helper::openFileDialog(ind == 0 ? Helper::FileDialogType::OPENAFILES :
+                                          Helper::FileDialogType::OPENSFILES,
+                               tr("Open Files"),
+                               m_openDir,
+                               result);
+        if (!result.isEmpty()) {
+            MediaInfo MI;
+            foreach (auto &path, result) {
+                if (MI.Open(path.toStdWString()) == 1) {
+                    const int vcnt = GINFO(0, "VideoCount").toInt();
+                    if (ind == 0) {
+                        const int acnt = GINFO(0, "AudioCount").toInt();
+                        if (vcnt == 0 && acnt == 1) {
+                            QString audioFormat = AINFO(0, "Format");
+                            const int smplrt_int = static_cast<int>(AINFO(0, "SamplingRate").toFloat() / 1000);
+                            const QString smplrt = (smplrt_int != 0) ? numToStr(smplrt_int) : "";
+                            if (!audioFormat.isEmpty()) {
+                                audioFormat += QString("  %1 kHz").arg(smplrt);
+                                _CHECKS(m_row, externAudioChecks).push_back(Helper::isSupported(audioFormat));
+                                _FIELDS(m_row, externAudioFormats).push_back(audioFormat);
+                                _FIELDS(m_row, externAudioChannels).push_back(AINFO(0, "Channels"));
+                                _FIELDS(m_row, externAudioChLayouts).push_back(AINFO(0, "ChannelsLayouts"));
+                                _FIELDS(m_row, externAudioDuration).push_back(AINFO(0, "Duration"));
+                                _FIELDS(m_row, externAudioLangs).push_back(AINFO(0, "Language"));
+                                _FIELDS(m_row, externAudioTitles).push_back(AINFO(0, "Title"));
+                                _FIELDS(m_row, externAudioPath).push_back(path);
+                                _CHECKS(m_row, externAudioDef).push_back(false);
+                            }
+                        } else {
+                            showInfoMessage(tr("File: \'%1\' is not audio file!").arg(path));
+                        }
+                    } else {
+                        const int scnt = GINFO(0, "TextCount").toInt();
+                        if (vcnt == 0 && scnt == 1) {
+                            const QString subtitleFormat = SINFO(0, "Format");
+                            if (!subtitleFormat.isEmpty()) {
+                                _CHECKS(m_row, externSubtChecks).push_back(Helper::isSupported(subtitleFormat));
+                                _FIELDS(m_row, externSubtFormats).push_back(subtitleFormat);
+                                _FIELDS(m_row, externSubtDuration).push_back(SINFO(0, "Duration"));
+                                _FIELDS(m_row, externSubtLangs).push_back(SINFO(0, "Language"));
+                                _FIELDS(m_row, externSubtTitles).push_back(SINFO(0, "Title"));
+                                _FIELDS(m_row, externSubtPath).push_back(path);
+                                _CHECKS(m_row, externSubtDef).push_back(false);
+                            }
+                        } else {
+                            showInfoMessage(tr("File: \'%1\' is not subtitle file!").arg(path));
+                        }
+                    }
+                    MI.Close();
+                } else {
+                    showInfoMessage(tr("File: \'%1\' cannot be opened!").arg(path));
+                }
+            }
+            if (_FIELDS(m_row, externAudioFormats).size() > 0) {
+                m_pAudioLabel->setVisible(false);
+                ui->streamAudio->setList(m_data[m_row]);
+            }
+            if (_FIELDS(m_row, externSubtFormats).size() > 0) {
+                m_pSubtitleLabel->setVisible(false);
+                ui->streamSubtitle->setList(m_data[m_row]);
+            }
         }
-        ui->frame_middle->setFocus();
     }
 }
 
-void Widget::on_actionClearSubtitleTitles_clicked()
+void MainWindow::onClearTitles()
 {
-    if (_row != -1) {
-        for (int stream = 0; stream < AMOUNT_SUBTITLES; stream++) {
-            QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-                + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-            lineEditTitleSubtitle->clear();
-            lineEditTitleSubtitle->insert("");
-            lineEditTitleSubtitle->setFocus();
-            lineEditTitleSubtitle->setModified(true);
-        }
-        ui->frame_middle->setFocus();
+    if (m_row != -1) {
+        const int ind = ui->tabWidgetStreams->currentIndex();
+        ind == 0 ? ui->streamAudio->clearTitles() :
+                   ui->streamSubtitle->clearTitles();
     }
 }
 
-void Widget::on_actionUndoTitles_clicked()
+void MainWindow::onUndoTitles()
 {
-    if (_row != -1) {
-        for (int stream = 0; stream < AMOUNT_AUDIO_STREAMS; stream++) {
-            QLineEdit *lineEditTitleAudio = ui->frameTab_2->findChild<QLineEdit *>("lineEditTitleAudio_"
-                + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-            lineEditTitleAudio->undo();
-            if (lineEditTitleAudio->text() != "") {
-                lineEditTitleAudio->setFocus();
-                lineEditTitleAudio->setCursorPosition(0);
-                lineEditTitleAudio->setModified(true);
-            }
-        }
-        for (int stream = 0; stream < AMOUNT_SUBTITLES; stream++) {
-            QLineEdit *lineEditTitleSubtitle = ui->frameTab_3->findChild<QLineEdit *>("lineEditTitleSubtitle_"
-                + QString::number(stream + 1), Qt::FindDirectChildrenOnly);
-            lineEditTitleSubtitle->undo();
-            if (lineEditTitleSubtitle->text() != "") {
-                lineEditTitleSubtitle->setFocus();
-                lineEditTitleSubtitle->setCursorPosition(0);
-                lineEditTitleSubtitle->setModified(true);
-            }
-        }
-        ui->frame_middle->setFocus();
+    if (m_row != -1) {
+        const int ind = ui->tabWidgetStreams->currentIndex();
+        ind == 0 ? ui->streamAudio->undoTitles() :
+                   ui->streamSubtitle->undoTitles();
     }
 }
 
@@ -2862,166 +2251,129 @@ void Widget::on_actionUndoTitles_clicked()
 ** Split Window
 ************************************************/
 
-void Widget::on_horizontalSlider_valueChanged(int value)
+void MainWindow::onSliderTimelineChanged(int value)
 {
-    if (_row != -1) {
-        double fps_double = _fps.toDouble();
-        if (fps_double != 0.0) {
-            _curTime = round(1000.0 * (static_cast<double>(value) / fps_double)) / 1000.0;
-        } else {
-            _curTime = 0.0;
-        }
-        ui->lineEditCurTime->setText(timeConverter(_curTime));
-        timerCallSetThumbnail->stop();
-        timerCallSetThumbnail->start();
+    if (m_row != -1) {
+        const double fps_double = m_fps.toDouble();
+        m_curTime = (fps_double != 0.0) ? round(1000.0 * (static_cast<double>(value)
+                                                         / fps_double)) / 1000.0 : 0.0;
+        ui->lineEditCurTime->setText(Helper::timeConverter(m_curTime));
+        m_pTimerSetThumbnail->stop();
+        m_pTimerSetThumbnail->start();
     }
 }
 
-void Widget::on_buttonFramePrevious_clicked()
+void MainWindow::onFramePrev()
 {
-    int value = ui->horizontalSlider->value();
-    if (value > 0) {
-        ui->horizontalSlider->setValue(value - 1);
+    const int value = ui->sliderTimeline->value();
+    if (value > 0)
+        ui->sliderTimeline->setValue(value - 1);
+}
+
+void MainWindow::onFrameNext()
+{
+    const int value = ui->sliderTimeline->value();
+    if (value < m_fr_count)
+        ui->sliderTimeline->setValue(value + 1);
+}
+
+void MainWindow::onSetStartTime()
+{
+    if (m_row != -1) {
+        m_startTime = (m_startTime > m_endTime && m_endTime != 0.0) ? m_endTime : m_curTime;
+        ui->lineEditStartTime->setText(Helper::timeConverter(m_startTime));
+        QTableWidgetItem *__item = new QTableWidgetItem(QString::number(m_startTime, 'f', 3));
+        ui->tableWidget->setItem(m_row, ColumnIndex::T_STARTTIME, __item);
     }
 }
 
-void Widget::on_buttonFrameNext_clicked()
+void MainWindow::onSetEndTime()
 {
-    int value = ui->horizontalSlider->value();
-    if (value < _fr_count) {
-        ui->horizontalSlider->setValue(value + 1);
+    if (m_row != -1) {
+        m_endTime = (m_curTime < m_startTime) ? m_startTime : m_curTime;
+        ui->lineEditEndTime->setText(Helper::timeConverter(m_endTime));
+        QTableWidgetItem *__item = new QTableWidgetItem(QString::number(m_endTime, 'f', 3));
+        ui->tableWidget->setItem(m_row, ColumnIndex::T_ENDTIME, __item);
     }
 }
 
-void Widget::on_buttonSetStartTime_clicked()
+void MainWindow::onResetLabels()
 {
-    if (_row != -1) {
-        _startTime = _curTime;
-        if (_startTime > _endTime && _endTime != 0.0) {
-            _startTime = _endTime;
-        }
-        ui->lineEditStartTime->setText(timeConverter(_startTime));
-        QTableWidgetItem *newItem_startTime = new QTableWidgetItem(QString::number(_startTime, 'f', 3));
-        ui->tableWidget->setItem(_row, ColumnIndex::T_STARTTIME, newItem_startTime);
-    }
-}
-
-void Widget::on_buttonSetEndTime_clicked()
-{
-    if (_row != -1) {
-        _endTime = _curTime;
-        if (_endTime < _startTime) {
-            _endTime =_startTime;
-        }
-        ui->lineEditEndTime->setText(timeConverter(_endTime));
-        QTableWidgetItem *newItem_endTime = new QTableWidgetItem(QString::number(_endTime, 'f', 3));
-        ui->tableWidget->setItem(_row, ColumnIndex::T_ENDTIME, newItem_endTime);
-    }
-}
-
-void Widget::on_actionResetLabels_clicked()
-{
-    if (_row != -1) {
+    if (m_row != -1) {
         ui->labelSplitPreview->clear();
-        ui->horizontalSlider->blockSignals(true);
-        ui->horizontalSlider->setValue(0);
-        ui->horizontalSlider->blockSignals(false);
+        ui->sliderTimeline->blockSignals(true);
+        ui->sliderTimeline->setValue(0);
+        ui->sliderTimeline->blockSignals(false);
 
-        _curTime = 0.0;
-        ui->lineEditCurTime->setText(timeConverter(_curTime));
+        m_curTime = 0.0;
+        ui->lineEditCurTime->setText(Helper::timeConverter(m_curTime));
 
-        _startTime = 0.0;
-        ui->lineEditStartTime->setText(timeConverter(_startTime));
-        QTableWidgetItem *newItem_startTime = new QTableWidgetItem(QString::number(_startTime, 'f', 3));
-        ui->tableWidget->setItem(_row, ColumnIndex::T_STARTTIME, newItem_startTime);
+        m_startTime = 0.0;
+        ui->lineEditStartTime->setText(Helper::timeConverter(m_startTime));
+        QTableWidgetItem *__item_st = new QTableWidgetItem(QString::number(m_startTime, 'f', 3));
+        ui->tableWidget->setItem(m_row, ColumnIndex::T_STARTTIME, __item_st);
 
-        _endTime = 0.0;
-        ui->lineEditEndTime->setText(timeConverter(_endTime));
-        QTableWidgetItem *newItem_endTime = new QTableWidgetItem(QString::number(_endTime, 'f', 3));
-        ui->tableWidget->setItem(_row, ColumnIndex::T_ENDTIME, newItem_endTime);
+        m_endTime = 0.0;
+        ui->lineEditEndTime->setText(Helper::timeConverter(m_endTime));
+        QTableWidgetItem *__item_end = new QTableWidgetItem(QString::number(m_endTime, 'f', 3));
+        ui->tableWidget->setItem(m_row, ColumnIndex::T_ENDTIME, __item_end);
     }
-}
-
-QString Widget::timeConverter(double &time)     /*** Time converter to hh:mm:ss.msc ***/
-{
-    const int h = static_cast<int>(trunc(time / 3600));
-    const int m = static_cast<int>(trunc((time - double(h * 3600)) / 60));
-    const int s = static_cast<int>(trunc(time - double(h * 3600) - double(m * 60)));
-    const int ms = static_cast<int>(round(1000 * (time - double(h * 3600) - double(m * 60) - double(s))));
-    const QString hrs = QString::number(h).rightJustified(2, '0');
-    const QString min = QString::number(m).rightJustified(2, '0');
-    const QString sec = QString::number(s).rightJustified(2, '0');
-    const QString msec = QString::number(ms).rightJustified(3, '0');
-    return QString("%1:%2:%3.%4").arg(hrs, min, sec, msec);
 }
 
 /************************************************
 ** Preset Window
 ************************************************/
 
-void Widget::set_defaults() /*** Set default presets ***/
+void MainWindow::setDefaultPresets() // Set default presets
 {
-    std::cout<< "Set defaults..." << std::endl;
+    Print("Set defaults...");
     QFile _prs_file(":/resources/data/default_presets.ini");
     if (_prs_file.open(QIODevice::ReadOnly)) {
         QDataStream in(&_prs_file);
         in.setVersion(QDataStream::Qt_4_0);
         int ver;
         in >> ver;
-        if (ver == PRESETS_VERSION) {
-            in >> _cur_param >> _pos_top >> _pos_cld >> _preset_table;
-        }
+        if (ver == PRESETS_VERSION) // Replace to open the old version
+            in >> m_curParams >> m_pos_top >> m_pos_cld >> m_preset_table;
         _prs_file.close();
     }
 }
 
-void Widget::on_buttonApplyPreset_clicked()  /*** Apply preset ***/
+void MainWindow::onApplyPreset()  // Apply preset
 {
-    int index = ui->treeWidget->currentIndex().row();
-    if (index < 0) {
-        _message = tr("Select preset first!\n");
-        call_task_complete(_message, false);
+    if (ui->treeWidget->currentIndex().row() < 0) {
+        showPopup(tr("Select preset first!\n"));
         return;
     }
     QTreeWidgetItem *item = ui->treeWidget->currentItem();
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem != nullptr) {
+    if (parentItem) {
         // Item is child...
-        for (int k = 0; k < PARAMETERS_COUNT; k++) {
-            _cur_param[k] = item->text(k+7);
-        }
-
+        for (int k = 0; k < PARAMETERS_COUNT; k++)
+            m_curParams[k] = item->text(k+7);
     } else {
         // Item is parent...
-        _message = tr("Select preset first!\n");
-        call_task_complete(_message, false);
+        showPopup(tr("Select preset first!\n"));
         return;
     }
-    _pos_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
-    _pos_cld = parentItem->indexOfChild(item);
-    std::cout << "Pos_top: " << _pos_top << std::endl;  // Current section pos
-    std::cout << "Pos_cld: " << _pos_cld << std::endl;  // Current preset pos
-    if (_row != -1) {
+    m_pos_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
+    m_pos_cld = parentItem->indexOfChild(item);
+    if (m_row != -1)
         get_output_filename();
-    }
 }
 
-void Widget::on_actionRemove_preset_clicked()  /*** Remove preset ***/
+void MainWindow::onRemovePreset()  // Remove preset
 {
-    int index = ui->treeWidget->currentIndex().row();
-    if (index < 0) {
+    if (ui->treeWidget->currentIndex().row() < 0)
         return;
-    }
     QTreeWidgetItem *item = ui->treeWidget->currentItem();
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem != nullptr) {
+    if (parentItem) {
         // Item is child...
-        _message = tr("Delete?");
-        bool confirm = call_dialog(_message);
-        if (confirm == true)
-        {
-            int index_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
-            int index_child = parentItem->indexOfChild(item);
+        bool confirm = showDialogMessage(tr("Delete?"));
+        if (confirm) {
+            const int index_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
+            const int index_child = parentItem->indexOfChild(item);
             updateCurPresetPos(index_top, index_child);
 
             QTreeWidgetItem *takenItem = parentItem->takeChild(index_child);
@@ -3032,10 +2384,9 @@ void Widget::on_actionRemove_preset_clicked()  /*** Remove preset ***/
 
     } else {
         // Item is parent...
-        int count_child = item->childCount();
-        if (count_child == 0) {
-            int index_top = ui->treeWidget->indexOfTopLevelItem(item);
-            int index_child = -1;
+        if (item->childCount() == 0) {
+            const int index_top = ui->treeWidget->indexOfTopLevelItem(item);
+            const int index_child = -1;
             updateCurPresetPos(index_top, index_child);
 
             QTreeWidgetItem *takenItem = ui->treeWidget->takeTopLevelItem(index_top);
@@ -3044,65 +2395,56 @@ void Widget::on_actionRemove_preset_clicked()  /*** Remove preset ***/
             updatePresetTable();
 
         } else {
-            _message = tr("Delete presets first!\n");
-            call_task_complete(_message, false);
+            showPopup(tr("Delete presets first!\n"), PopupMessage::Icon::Warning);
         }
     }
 }
 
-void Widget::on_actionEdit_preset_clicked()  /*** Edit preset ***/
+void MainWindow::onEditPreset()  // Edit preset
 {
-    int index = ui->treeWidget->currentIndex().row();
-    if (index < 0) {
-        _message = tr("Select preset first!\n");
-        call_task_complete(_message, false);
+    if (ui->treeWidget->currentIndex().row() < 0) {
+        showPopup(tr("Select preset first!\n"));
         return;
     }
     QTreeWidgetItem *item = ui->treeWidget->currentItem();
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem != nullptr) {
+    if (parentItem) {
         // Item is child...
-        for (int k = 0; k < PARAMETERS_COUNT; k++) {
-            _new_param[k] = item->text(k+7);
-        };
-        Preset presetWindow(this);
-        presetWindow.setParameters(&_presetWindowGeometry, &_new_param);
-        presetWindow.setModal(true);
-        if (presetWindow.exec() == QDialog::Accepted) {
-            for (int k = 0; k < PARAMETERS_COUNT; k++) {
-                item->setText(k+7, _new_param[k]);
-            }
-            updateInfoFields(_new_param[1],
-                             _new_param[2],
-                             _new_param[3],
-                             _new_param[4],
-                             _new_param[11],
-                             _new_param[12],
-                             _new_param[21],
+        for (int k = 0; k < PARAMETERS_COUNT; k++)
+            m_newParams[k] = item->text(k+7);
+        Preset presetWindow(this, &m_newParams);
+        if (presetWindow.exec() == Dialog::Accept) {
+            for (int k = 0; k < PARAMETERS_COUNT; k++)
+                item->setText(k+7, m_newParams[k]);
+            updateInfoFields(m_newParams[1],
+                             m_newParams[2],
+                             m_newParams[3],
+                             m_newParams[4],
+                             m_newParams[11],
+                             m_newParams[12],
+                             m_newParams[21],
                              item, true);
             int index_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
             int index_child = parentItem->indexOfChild(item);
-            if (_pos_top == index_top && _pos_cld == index_child) {
-                for (int k = 0; k < PARAMETERS_COUNT; k++) {
-                    _cur_param[k] = item->text(k+7);
-                }
-                if (_row != -1) {
+            if (m_pos_top == index_top && m_pos_cld == index_child) {
+                for (int k = 0; k < PARAMETERS_COUNT; k++)
+                    m_curParams[k] = item->text(k+7);
+                if (m_row != -1)
                     get_output_filename();
-                }
             }
             updatePresetTable();
         }
     } else {
         // Item is parent...
-        _message = tr("Select preset first!\n");
-        call_task_complete(_message, false);
+        showPopup(tr("Select preset first!\n"));
     }
 }
 
-void Widget::add_section()  /*** Add section ***/
+void MainWindow::onAddSection()  // Add section
 {
     QFont parentFont;
     parentFont.setBold(true);
+    parentFont.setItalic(true);
     QTreeWidgetItem *root = new QTreeWidgetItem();
     root->setText(0, "New section");
     root->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
@@ -3114,16 +2456,19 @@ void Widget::add_section()  /*** Add section ***/
     updatePresetTable();
 }
 
-void Widget::add_preset()  /*** Add preset ***/
+void MainWindow::onAddPreset()  // Add preset
 {
-    int index = ui->treeWidget->currentIndex().row();
-    if (index < 0) {
-        _message = tr("First add a section!\n");
-        call_task_complete(_message, false);
+    if (ui->treeWidget->currentIndex().row() < 0) {
+        showPopup(tr("First add a section!\n"), PopupMessage::Icon::Warning);
         return;
     }
 
-    QVector<QString> cur_param;
+    QVector<QString> cur_param = {
+        "Emergency, Res: Source, Fps: Source, YUV, 4:2:2, 10 bit, HDR: Enabled, Audio: PCM 16 bit, MOV",
+        "18", "0", "0", "Auto", "Auto", "Auto", "0", "0", "0", "0", "0", "0", "0", "", "", "", "", "0",
+        "From source", "From source", "0", "0", "Auto", "0", "0", "0", "0", "0", "0", "Emergency", "0",
+        "0", "0"
+    };
     QFile _prs_file(":/resources/data/default_presets.ini");
     if (_prs_file.open(QIODevice::ReadOnly)) {
         QDataStream in(&_prs_file);
@@ -3131,43 +2476,42 @@ void Widget::add_preset()  /*** Add preset ***/
         int ver;
         in >> ver;
         if (ver == PRESETS_VERSION) {
+            cur_param.clear();
             in >> cur_param;
-            QTreeWidgetItem *item = ui->treeWidget->currentItem();
-            QTreeWidgetItem *parentItem = item->parent();
-            QTreeWidgetItem *child = new QTreeWidgetItem();
-            for (int k = 0; k < PARAMETERS_COUNT; k++) {
-                child->setText(k + 7, cur_param[k]);
-            }
-            updateInfoFields(cur_param[1], cur_param[2], cur_param[3], cur_param[4],
-                             cur_param[11], cur_param[12], cur_param[21], child, true);
-            setItemStyle(child);
-            if (parentItem != nullptr) {
-                // Item is child...
-                parentItem->addChild(child);
-
-                int index_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
-                int index_child = parentItem->indexOfChild(child);
-                updateCurPresetPos(index_top, index_child);
-            } else {
-                // Item is parent...
-                item->addChild(child);
-                ui->treeWidget->expandItem(item);
-
-                int index_top = ui->treeWidget->indexOfTopLevelItem(item);
-                int index_child = item->indexOfChild(child);
-                updateCurPresetPos(index_top, index_child);
-            }
-            updatePresetTable();
+        } else {
+            Print("Added energercy params...");
         }
         _prs_file.close();
     }
-}
-
-void Widget::renameSectionPreset()
-{
     QTreeWidgetItem *item = ui->treeWidget->currentItem();
     QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem != nullptr) {
+    QTreeWidgetItem *child = new QTreeWidgetItem();
+    for (int k = 0; k < PARAMETERS_COUNT; k++)
+        child->setText(k + 7, cur_param[k]);
+    updateInfoFields(cur_param[1], cur_param[2], cur_param[3], cur_param[4],
+                     cur_param[11], cur_param[12], cur_param[21], child, true);
+    setItemStyle(child);
+    if (parentItem) {
+        // Item is child...
+        parentItem->addChild(child);
+        const int index_top = ui->treeWidget->indexOfTopLevelItem(parentItem);
+        const int index_child = parentItem->indexOfChild(child);
+        updateCurPresetPos(index_top, index_child);
+    } else {
+        // Item is parent...
+        item->addChild(child);
+        ui->treeWidget->expandItem(item);
+        const int index_top = ui->treeWidget->indexOfTopLevelItem(item);
+        const int index_child = item->indexOfChild(child);
+        updateCurPresetPos(index_top, index_child);
+    }
+    updatePresetTable();
+}
+
+void MainWindow::onRenamePreset()
+{
+    QTreeWidgetItem *item = ui->treeWidget->currentItem();
+    if (item->parent()) {
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
         ui->treeWidget->editItem(item, 0);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
@@ -3176,433 +2520,200 @@ void Widget::renameSectionPreset()
     }
 }
 
-void Widget::setItemStyle(QTreeWidgetItem *item)
+void MainWindow::setItemStyle(QTreeWidgetItem *item)
 {
     QFont font = qApp->font();
     font.setItalic(true);
     QColor foregroundChildColor;
-    switch (_theme) {
+    switch (m_theme) {
     case Theme::GRAY:
     case Theme::DARK:
     case Theme::WAVE:
-        foregroundChildColor.setRgb(qRgb(150, 190, 220));
+        foregroundChildColor.setRgb(qRgb(150, 150, 150));
         break;
-    case Theme::DEFAULT:
-        foregroundChildColor.setRgb(qRgb(30, 50, 150));
+    case Theme::LIGHT:
+        foregroundChildColor.setRgb(qRgb(20, 20, 30));
         break;
     }
     item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
     item->setTextAlignment(0, Qt::AlignLeft | Qt::AlignVCenter);
     item->setForeground(0, foregroundChildColor);
     item->setFont(0, font);
-    for (int column = 1; column < 7; column++) {
+    Q_LOOP(column, 1, 7) {
         item->setTextAlignment(column, Qt::AlignCenter);
         item->setForeground(column, foregroundChildColor);
         item->setFont(column, font);
     }
 }
 
-void Widget::updateCurPresetPos(int &index_top, int &index_child)
+void MainWindow::updateCurPresetPos(const int index_top, const int index_child)
 {
-    std::cout << "Pos top: " << _pos_top << " Pos child: " << _pos_cld
-              << " >>>>>> Index top: " << index_top << " Index child: " << index_child << std::endl;
-    //if (index_child == _pos_cld) {
-    _pos_top = -1;
-    _pos_cld = -1;
-    _cur_param[CurParamIndex::OUTPUT_PARAM] = tr("Preset not selected");
-    if (_row != -1) {
+    Q_UNUSED(index_top)
+    Q_UNUSED(index_child)
+    m_pos_top = -1;
+    m_pos_cld = -1;
+    m_curParams[CurParamIndex::OUTPUT_PARAM] = tr("Preset not selected");
+    if (m_row != -1)
         get_output_filename();
-    }
-    //}
 }
 
-void Widget::updateInfoFields(QString &codec_qstr,
-                              QString &mode_qstr,
-                              QString &container_qstr,
-                              QString &bqr_qstr,
-                              QString &pass_qstr,
-                              QString &preset_qstr,
-                              QString &acodec_qstr,
+void MainWindow::updateInfoFields(const QString &codec_qstr,
+                              const QString &mode_qstr,
+                              const QString &container_qstr,
+                              const QString &bqr_qstr,
+                              const QString &pass_qstr,
+                              const QString &preset_qstr,
+                              const QString &acodec_qstr,
                               QTreeWidgetItem *item,
-                              bool defaultNameFlag)
+                              const bool defaultNameFlag)
 {
-    int codec = codec_qstr.toInt();
-    int mode = mode_qstr.toInt();
-    int preset = preset_qstr.toInt();
-    int pass = pass_qstr.toInt();
-    int acodec = acodec_qstr.toInt();
-    int container = container_qstr.toInt();
+    Tables t;
+    const int codec = codec_qstr.toInt();
     if (defaultNameFlag) {
-        item->setText(0, updateFieldCodec(codec));
-        QString newPresetName = item->text(0);
+        item->setText(0, t.arr_codec[codec][0]);
+        const QString newPresetName = item->text(0);
         item->setText(30 + 7, newPresetName);
     }
-    item->setText(1, updateFieldMode(codec, mode));
+    item->setText(1, t.getCurrentMode(codec, mode_qstr.toInt()));
     item->setText(2, bqr_qstr);
-    item->setText(3, updateFieldPreset(codec, preset));
-    item->setText(4, updateFieldPass(codec, pass));
-    item->setText(5, updateFieldAcodec(codec, acodec));
-    item->setText(6, updateFieldContainer(codec, container));
+    item->setText(3, t.arr_preset[codec][preset_qstr.toInt()]);
+    item->setText(4, t.getCurrentPass(codec, pass_qstr.toInt()));
+    item->setText(5, t.arr_acodec[codec][acodec_qstr.toInt()]);
+    item->setText(6, t.arr_container[codec][container_qstr.toInt()]);
 }
 
-void Widget::updatePresetTable()
+void MainWindow::updatePresetTable()
 {
-    int TOP_LEVEL_ITEMS_COUNT = ui->treeWidget->topLevelItemCount();
     int CHILD_COUNT = 0;
-    for (int i = 0; i < TOP_LEVEL_ITEMS_COUNT; i++) {
+    const int TOP_LEVEL_ITEMS_COUNT = ui->treeWidget->topLevelItemCount();
+    Q_LOOP(i, 0, TOP_LEVEL_ITEMS_COUNT)
         CHILD_COUNT += ui->treeWidget->topLevelItem(i)->childCount();
-    }
-    int ROWS_COUNT = TOP_LEVEL_ITEMS_COUNT + CHILD_COUNT;  // Count of all rows...
-    /****************************************************/
-    for (int i = 0; i < PARAMETERS_COUNT+1; i++) {
-      _preset_table[i].resize(ROWS_COUNT);
-    }
-    /****************************************************/
-    int row = 0;
-    for (int top = 0; top < TOP_LEVEL_ITEMS_COUNT; top++) {
-        _preset_table[0][row] = ui->treeWidget->topLevelItem(top)->text(0);
-        _preset_table[PARAMETERS_COUNT][row] = "TopLewelItem";
 
+    const int ROWS_COUNT = TOP_LEVEL_ITEMS_COUNT + CHILD_COUNT;  // Count of all rows
+    Q_LOOP(i, 0, PARAMETERS_COUNT + 1)
+      m_preset_table[i].resize(ROWS_COUNT);
+
+    int row = 0;
+    Q_LOOP(top, 0, TOP_LEVEL_ITEMS_COUNT) {
+        m_preset_table[0][row] = ui->treeWidget->topLevelItem(top)->text(0);
+        m_preset_table[PARAMETERS_COUNT][row] = "TopLewelItem";
         CHILD_COUNT = ui->treeWidget->topLevelItem(top)->childCount();
-        for (int child = 0; child < CHILD_COUNT; child++) {
+        Q_LOOP(child, 0, CHILD_COUNT) {
             row++;
-            for (int column = 0; column < PARAMETERS_COUNT; column++) {
-                _preset_table[column][row] = ui->treeWidget->topLevelItem(top)->child(child)->text(column+7);
-            }
-            _preset_table[PARAMETERS_COUNT][row] = "ChildItem";
+            Q_LOOP(column, 0, PARAMETERS_COUNT)
+                m_preset_table[column][row] = ui->treeWidget->topLevelItem(top)->child(child)->text(column+7);
+            m_preset_table[PARAMETERS_COUNT][row] = "ChildItem";
         }
         row++;
     }
-    /****************************************************/
-    std::cout << _preset_table[0].size() << " x " << _preset_table.size() << std::endl; // Table size
+    Print(m_preset_table[0].size() << " x " << m_preset_table.size());
 }
 
-QString Widget::updateFieldCodec(int &codec)
+void MainWindow::setPresetIcon(QTreeWidgetItem *item, bool collapsed)
 {
-    QString arr_codec[NUMBER_PRESETS] = {
-        tr("H.265/HEVC 4:2:0 12 bit"),
-        tr("H.265/HEVC 4:2:0 10 bit"),
-        tr("H.265/HEVC 4:2:0 8 bit"),
-        tr("H.264/AVC 4:2:0 8 bit"),
-        tr("VP9 4:2:0 10 bit"),
-        tr("VP9 4:2:0 8 bit"),
-        tr("Intel QSV H.265/HEVC 4:2:0 10 bit"),
-        tr("Intel QSV H.265/HEVC 4:2:0 8 bit"),
-        tr("Intel QSV H.264/AVC 4:2:0 8 bit"),
-        tr("Intel QSV VP9 4:2:0 10 bit"),
-        tr("Intel QSV VP9 4:2:0 8 bit"),
-        tr("Intel QSV MPEG-2 4:2:0 8 bit"),
-        tr("Intel VAAPI H.264/AVC 4:2:0 8 bit"), // Intel VAAPI h264
-        tr("NVENC H.265/HEVC 4:2:0 10 bit"),
-        tr("NVENC H.265/HEVC 4:2:0 8 bit"),
-        tr("NVENC H.264/AVC 4:2:0 8 bit"),
-        tr("ProRes Proxy"),
-        "ProRes LT",
-        tr("ProRes Standard"),
-        "ProRes HQ",
-        "ProRes 4444",
-        "ProRes 4444XQ",
-        "DNxHR LB",
-        "DNxHR SQ",
-        "DNxHR HQ",
-        "DNxHR HQX",
-        "DNxHR 444",
-        "XDCAM HD422",
-        "XAVC 4:2:2",
-        tr("From source")
-    };
-    return arr_codec[codec];
-}
-
-QString Widget::updateFieldMode(int &codec, int &mode)
-{
-    QString arr_mode[NUMBER_PRESETS][5] = {
-        {"CBR",      "ABR", "VBR", "CRF", "CQP"},
-        {"CBR",      "ABR", "VBR", "CRF", "CQP"},
-        {"CBR",      "ABR", "VBR", "CRF", "CQP"},
-        {"CBR",      "ABR", "VBR", "CRF", "CQP"},
-        {"ABR",      "CRF", "",    "",    ""},
-        {"ABR",      "CRF", "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {"VBR",      "CQP", "",    "",    ""},
-        {"ABR",      "CRF", "",    "",    ""},
-        {"ABR",      "CRF", "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {"VBR",      "CQP", "",    "",    ""}, // Intel VAAPI h264
-        {"VBR",      "",    "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""},
-        {"VBR",      "",    "",    "",    ""},
-        {"CBR",      "",    "",    "",    ""},
-        {tr("Auto"), "",    "",    "",    ""}
-    };
-    return arr_mode[codec][mode];
-}
-
-QString Widget::updateFieldPreset(int &codec, int &preset)
-{
-    QString arr_preset[NUMBER_PRESETS][10] = {
-        {tr("None"), tr("Ultrafast"), tr("Superfast"), tr("Veryfast"), tr("Faster"), tr("Fast"), tr("Medium"), tr("Slow"),     tr("Slower"), tr("Veryslow")},
-        {tr("None"), tr("Ultrafast"), tr("Superfast"), tr("Veryfast"), tr("Faster"), tr("Fast"), tr("Medium"), tr("Slow"),     tr("Slower"), tr("Veryslow")},
-        {tr("None"), tr("Ultrafast"), tr("Superfast"), tr("Veryfast"), tr("Faster"), tr("Fast"), tr("Medium"), tr("Slow"),     tr("Slower"), tr("Veryslow")},
-        {tr("None"), tr("Ultrafast"), tr("Superfast"), tr("Veryfast"), tr("Faster"), tr("Fast"), tr("Medium"), tr("Slow"),     tr("Slower"), tr("Veryslow")},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), tr("Veryfast"),  tr("Faster"),    tr("Fast"),     tr("Medium"), tr("Slow"), tr("Slower"), tr("Veryslow"), "",           ""},
-        {tr("None"), tr("Veryfast"),  tr("Faster"),    tr("Fast"),     tr("Medium"), tr("Slow"), tr("Slower"), tr("Veryslow"), "",           ""},
-        {tr("None"), tr("Veryfast"),  tr("Faster"),    tr("Fast"),     tr("Medium"), tr("Slow"), tr("Slower"), tr("Veryslow"), "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), tr("Veryfast"),  tr("Faster"),    tr("Fast"),     tr("Medium"), tr("Slow"), tr("Slower"), tr("Veryslow"), "",           ""},
-        {tr("None"), tr("Veryfast"),  tr("Faster"),    tr("Fast"),     tr("Medium"), tr("Slow"), tr("Slower"), tr("Veryslow"), "",           ""}, // Intel VAAPI h264
-        {tr("None"), tr("Slow"),      "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), tr("Slow"),      "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), tr("Slow"),      "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""},
-        {tr("None"), tr("Ultrafast"), tr("Superfast"), tr("Veryfast"), tr("Faster"), tr("Fast"), tr("Medium"), tr("Slow"),     tr("Slower"), tr("Veryslow")},
-        {tr("None"), "",              "",              "",             "",           "",         "",           "",             "",           ""}
-    };
-    return arr_preset[codec][preset];
-}
-
-QString Widget::updateFieldPass(int &codec, int &pass)
-{
-    QString arr_pass[NUMBER_PRESETS][2] = {
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("1 Pass"), tr("2 Pass")},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""}, // Intel VAAPI h264
-        {tr("2 Pass"), ""},
-        {tr("2 Pass"), ""},
-        {tr("2 Pass"), ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""},
-        {tr("Auto"),   ""}
-    };
-    return arr_pass[codec][pass];
-}
-
-QString Widget::updateFieldAcodec(int &codec, int &acodec)
-{
-    QString arr_acodec[NUMBER_PRESETS][6] = {
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"Opus",       "Vorbis",     tr("Source"), "",           "",     ""},
-        {"Opus",       "Vorbis",     tr("Source"), "",           "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"Opus",       "Vorbis",     tr("Source"), "",           "",     ""},
-        {"Opus",       "Vorbis",     tr("Source"), "",           "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""}, // Intel VAAPI h264
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"AAC",        "AC3",        "DTS",        tr("Source"), "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"PCM 16 bit", "",           "",           "",           "",     ""},
-        {"PCM 16 bit", "PCM 24 bit", "PCM 32 bit", "",           "",     ""},
-        {"AAC",        "AC3",        "DTS",        "Vorbis",     "Opus", tr("Source")}
-    };
-    return arr_acodec[codec][acodec];
-}
-
-QString Widget::updateFieldContainer(int &codec, int &container)
-{
-    QString arr_container[NUMBER_PRESETS][5] = {
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"MKV",  "MOV", "MP4", "M2TS", "TS"},
-        {"MKV",  "MOV", "MP4", "M2TS", "TS"},
-        {"WebM", "MKV", "",    "",     ""},
-        {"WebM", "MKV", "",    "",     ""},
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"WebM", "MKV", "",    "",     ""},
-        {"WebM", "MKV", "",    "",     ""},
-        {"MKV",  "MPG", "AVI", "M2TS", "TS"},
-        {"MKV",  "MOV", "MP4", "",     ""}, // Intel VAAPI h264
-        {"MKV",  "MOV", "MP4", "",     ""},
-        {"MKV",  "MOV", "MP4", "M2TS", "TS"},
-        {"MKV",  "MOV", "MP4", "M2TS", "TS"},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MOV",  "",    "",    "",     ""},
-        {"MXF",  "",    "",    "",     ""},
-        {"MXF",  "",    "",    "",     ""},
-        {"MKV",  "MOV", "MP4", "M2TS", "TS"}
-    };
-    return arr_container[codec][container];
-}
-
-void Widget::setPresetIcon(QTreeWidgetItem *item, bool collapsed)
-{
-    QIcon sectionIcon;
-    QString path;
-    switch (_theme) {
+    QString file;
+    switch (m_theme) {
     case Theme::GRAY:
     case Theme::DARK:
     case Theme::WAVE:
-        if (collapsed) {
-            path = QString::fromUtf8(":/resources/icons/16x16/cil-folder.png");
-        } else {
-            path = QString::fromUtf8(":/resources/icons/16x16/cil-folder-open.png");}
+        file = (collapsed) ? QString::fromUtf8("folder.svg") :
+                             QString::fromUtf8("folder_open.svg");
         break;
-    case Theme::DEFAULT:
-        if (collapsed) {
-            path = QString::fromUtf8(":/resources/icons/16x16/cil-folder_light.png");
-        } else {
-            path = QString::fromUtf8(":/resources/icons/16x16/cil-folder-open_light.png");}
+    case Theme::LIGHT:
+        file = (collapsed) ? QString::fromUtf8("folder_light.svg") :
+                             QString::fromUtf8("folder_open_light.svg");
         break;
     }
-    sectionIcon.addFile(path, QSize(), QIcon::Normal, QIcon::Off);
-    item->setIcon(0, sectionIcon);
+    QIcon icon = QIcon(QPixmap(":/resources/icons/svg/" + file));
+    item->setIcon(0, icon);
 }
 
-void Widget::on_treeWidget_itemCollapsed(QTreeWidgetItem *item)
+void MainWindow::onTreeCollapsed(QTreeWidgetItem *item)
 {
-    if (item != nullptr) {
+    if (item)
         setPresetIcon(item, true);
-    }
 }
 
-void Widget::on_treeWidget_itemExpanded(QTreeWidgetItem *item)
+void MainWindow::onTreeExpanded(QTreeWidgetItem *item)
 {
-    if (item != nullptr) {
+    if (item)
         setPresetIcon(item, false);
-    }
 }
 
-void Widget::on_treeWidget_itemChanged(QTreeWidgetItem *item, int column)
+void MainWindow::onTreeChanged(QTreeWidgetItem *item, int column)
 {
     if (item->isSelected() && column == 0) {
-        QTreeWidgetItem *parentItem = item->parent();
-        if (parentItem != nullptr) {
-            QString newPresetName = item->text(0);
+        if (item->parent()) {
+            const QString newPresetName = item->text(0);
             item->setText(30 + 7, newPresetName);
         }
         updatePresetTable();
     }
 }
 
-void Widget::on_treeWidget_itemDoubleClicked(QTreeWidgetItem *item, int column)
+void MainWindow::onTreeDblClicked(QTreeWidgetItem *item, int column)
 {
-    QTreeWidgetItem *parentItem = item->parent();
-    if (parentItem != nullptr) {
-        on_buttonApplyPreset_clicked();
-        std::cout << "Double clicked column: " << column << std::endl;
-    }
+    Q_UNUSED(column)
+    if (item->parent())
+        onApplyPreset();
 }
 
-void Widget::providePresetContextMenu(const QPoint &position)     /*** Call tree items menu  ***/
+void MainWindow::providePresetContextMenu(const QPoint &pos) // Call tree items menu
 {
-    QTreeWidgetItem *item = ui->treeWidget->itemAt(position);
-    if (item != nullptr) {
-        QTreeWidgetItem *parentItem = item->parent();
-        if (parentItem != nullptr) {
-            presetMenu->exec(ui->treeWidget->mapToGlobal(QPoint(position.x(), position.y() + 35)));
-        } else {
-            sectionMenu->exec(ui->treeWidget->mapToGlobal(QPoint(position.x(), position.y() + 35)));
-        }
+    QTreeWidgetItem *item = ui->treeWidget->itemAt(pos);
+    if (item) {
+        const QPoint globPos = ui->treeWidget->mapToGlobal(pos + QPoint(0, 35));
+        item->parent() ? m_pPresetMenu->exec(globPos) : m_pSectionMenu->exec(globPos);
     }
 }
 
 /************************************************
-** Dialogs Windows
+** Message Windows
 ************************************************/
 
-bool Widget::call_dialog(const QString &_message)  /*** Call dialog ***/
+bool MainWindow::showDialogMessage(const QString &message)
 {
-    Dialog dialog(this);
-    dialog.setMessage(_message);
-    dialog.setModal(true);
-    if (dialog.exec() == QDialog::Accepted) {
+    Message msg(this, MessType::DIALOG, message);
+    if (msg.exec() == Dialog::Accept)
         return true;
-    }
     return false;
 }
 
-void Widget::call_task_complete(const QString &_message, const bool &_timer_mode)  /*** Call task complete ***/
+void MainWindow::showPopup(const QString &text, PopupMessage::Icon icon)
 {
-    if (this->isHidden()) {
-        if (_hideInTrayFlag && !_timer_mode) {
-            trayIcon->showMessage(_message, tr("Task"), QSystemTrayIcon::Information, 151000);
-        }
-        else if (_timer_mode) {
-            this->show();
-            Taskcomplete taskcomplete(this);
-            taskcomplete.setMessage(_message, _timer_mode);
-            taskcomplete.setModal(true);
-            taskcomplete.exec();
+    PopupMessage *msg = new PopupMessage(this, icon, text);
+    msg->show();
+    addReport(text, static_cast<ReportLog::Icon>(icon));
+}
+
+void MainWindow::addReport(const QString &log, ReportLog::Icon icon)
+{
+    const int ind = m_reportLog.size();
+    m_reportLog.resize(ind + 1);
+    const QString time = QTime::currentTime().toString();
+    m_reportLog[ind].reportIcon = icon;
+    m_reportLog[ind].reportTime = time;
+    m_reportLog[ind].reportMsg = log;
+}
+
+void MainWindow::showInfoMessage(const QString &message, const bool timer_mode)
+{
+    auto showMessage = [this, message, timer_mode]() {
+        ReportLog::Icon icon = timer_mode ? ReportLog::Icon::Info :
+                                            ReportLog::Icon::Critical;
+        addReport(message, icon);
+        Message msg(this, MessType::INFO, message, timer_mode);
+        msg.exec();
+    };
+    if (isHidden()) {
+        if (m_hideInTrayFlag && !timer_mode) {
+            m_pTrayIcon->showMessage(message, tr("Task"), QSystemTrayIcon::Information, 151000);
+        } else
+        if (timer_mode) {
+            show();
+            showMessage();
         }
     } else {
-        Taskcomplete taskcomplete(this);
-        taskcomplete.setMessage(_message, _timer_mode);
-        taskcomplete.setModal(true);
-        taskcomplete.exec();
+        showMessage();
     }
 }

@@ -6,11 +6,8 @@ License:    GPLv3
 URL:        https://github.com/CineEncoder/%{name}
 Source0:    %{name}-%{version}.tar.xz
 
-BuildRequires: gcc-c++
-BuildRequires: libmediainfo-devel
-BuildRequires: qt5-qtbase-devel
-BuildRequires: qt5-qtmultimedia-devel
-Requires: ffmpeg, mkvtoolnix
+BuildRequires: gcc-c++, qt5-qtbase-devel, qt5-qtmultimedia-devel, qt5-qtsvg-devel, qt5-qtx11extras-devel, libmediainfo-devel, libXext-devel
+Requires: ffmpeg, mkvtoolnix, intel-media-driver, libva-intel-driver
 
 %description
 Cine Encoder is an application, uses the FFmpeg, MKVToolNix and MediaInfo
@@ -61,5 +58,5 @@ install -m 0644 share/%{name}.wav %{buildroot}/%{_datadir}/sounds
 %{_datadir}/sounds/cine-encoder.wav
 
 %changelog
-* Sat Mar 19 2022 Cine Encoder <depositmail@rambler.ru>
+* Sun Jul 17 2022 Cine Encoder <depositmail@rambler.ru>
 - Initial package for Fedora.
